@@ -9,17 +9,17 @@ from layers.seq2seq import Seq2Seq, EncoderRNN
 import numpy as np 
 
 class Model(nn.Module):
-	def __init__(self, in_channels, graph_args, edge_importance_weighting, **kwargs):
+	def __init__(self, in_channels, graph_args, edge_importance_weighting, use_cuda, **kwargs):
 		super().__init__()
 
 		# load graph
 		self.graph = Graph(**graph_args)
-		A = np.ones((graph_args['max_hop']+1, graph_args['num_node'], graph_args['num_node']))
+		A = np.ones((graph_args['max_hop']+1, graph_args['num_node'], graph_args['num_node'])) # (3, 120, 120)
 
 		# build networks
 		spatial_kernel_size = np.shape(A)[0]
 		temporal_kernel_size = 5 #9 #5 # 3
-		kernel_size = (temporal_kernel_size, spatial_kernel_size)
+		kernel_size = (temporal_kernel_size, spatial_kernel_size) # (5, 3)
 
 		# best
 		self.st_gcn_networks = nn.ModuleList((
@@ -39,9 +39,9 @@ class Model(nn.Module):
 
 		self.num_node = num_node = self.graph.num_node
 		self.out_dim_per_node = out_dim_per_node = 2 #(x, y) coordinate
-		self.seq2seq_car = Seq2Seq(input_size=(64), hidden_size=out_dim_per_node, num_layers=2, dropout=0.5, isCuda=True)
-		self.seq2seq_human = Seq2Seq(input_size=(64), hidden_size=out_dim_per_node, num_layers=2, dropout=0.5, isCuda=True)
-		self.seq2seq_bike = Seq2Seq(input_size=(64), hidden_size=out_dim_per_node, num_layers=2, dropout=0.5, isCuda=True)
+		self.seq2seq_car = Seq2Seq(input_size=(64), hidden_size=out_dim_per_node, num_layers=2, dropout=0.5, isCuda=use_cuda)
+		self.seq2seq_human = Seq2Seq(input_size=(64), hidden_size=out_dim_per_node, num_layers=2, dropout=0.5, isCuda=use_cuda)
+		self.seq2seq_bike = Seq2Seq(input_size=(64), hidden_size=out_dim_per_node, num_layers=2, dropout=0.5, isCuda=use_cuda)
 
 
 	def reshape_for_lstm(self, feature):
@@ -65,7 +65,7 @@ class Model(nn.Module):
 		return now_feat
 
 	def forward(self, pra_x, pra_A, pra_pred_length, pra_teacher_forcing_ratio=0, pra_teacher_location=None):
-		x = pra_x
+		x = pra_x # (N, 4, 6, 120)
 		
 		# forwad
 		for gcn, importance in zip(self.st_gcn_networks, self.edge_importance):

@@ -35,7 +35,14 @@ batch_size_test = 1
 total_epoch = 50
 base_lr = 0.01
 lr_decay_epoch = 5
-dev = 'cuda:0' 
+if torch.cuda.is_available():
+	dev = torch.device("cuda")
+	use_cuda = True
+else:
+	dev = torch.device("cpu")
+	use_cuda = False
+print(use_cuda, dev)
+# dev = 'cuda:0' 
 work_dir = './trained_models'
 log_file = os.path.join(work_dir,'log_test.txt')
 test_result_file = 'prediction_result.txt'
@@ -349,7 +356,7 @@ def run_test(pra_model, pra_data_path):
 
 if __name__ == '__main__':
 	graph_args={'max_hop':2, 'num_node':120}
-	model = Model(in_channels=4, graph_args=graph_args, edge_importance_weighting=True)
+	model = Model(in_channels=4, graph_args=graph_args, edge_importance_weighting=True, use_cuda=use_cuda)
 	model.to(dev)
 
 	# train and evaluate model

@@ -11,7 +11,7 @@ class Graph_Conv_Block(nn.Module):
 				 dropout=0,
 				 residual=True):
 		super().__init__()
-
+		# kenelz_size: (5, 3)
 		assert len(kernel_size) == 2
 		assert kernel_size[0] % 2 == 1
 		padding = ((kernel_size[0] - 1) // 2, 0)

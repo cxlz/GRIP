@@ -5,7 +5,7 @@ from scipy import spatial
 import pickle
 
 # Please change this to your location
-data_root = '/data/xincoder/ApolloScape/'
+data_root = 'data/xincoder/ApolloScape/'
 
 
 history_frames = 6 # 3 second * 2 frame/second

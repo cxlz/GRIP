@@ -13,7 +13,7 @@ class ConvTemporalGraphical(nn.Module):
                  bias=True):
         super().__init__()
 
-        self.kernel_size = kernel_size
+        self.kernel_size = kernel_size # 3
         self.conv = nn.Conv2d(
             in_channels,
             out_channels * kernel_size,
