@@ -174,9 +174,9 @@ def generate_data(pra_file_path_list, pra_is_train=True):
 
 	# save training_data and trainjing_adjacency into a file.
 	if pra_is_train:
-		save_path = 'train_data.pkl'
+		save_path = os.path.join(data_root, 'prediction_train/train_data.pkl')
 	else:
-		save_path = 'test_data.pkl'
+		save_path = os.path.join(data_root, 'prediction_test/test_data.pkl')
 	with open(save_path, 'wb') as writer:
 		pickle.dump([all_data, all_adjacency, all_mean_xy], writer)
 

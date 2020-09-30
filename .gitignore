@@ -1,5 +1,5 @@
-*.pkl
 __pycache__
 *.txt
 .vscode/
 *.pt
+*.pkl
