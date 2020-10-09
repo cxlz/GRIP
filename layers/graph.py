@@ -17,6 +17,9 @@ class Graph():
 
 	def get_adjacency(self, A):
 		# compute hop steps
+		# A0 单位矩阵
+		# A1 相邻障碍物
+		# A2 有共同的相邻障碍物
 		self.hop_dis = np.zeros((self.num_node, self.num_node)) + np.inf
 		transfer_mat = [np.linalg.matrix_power(A, d) for d in range(self.max_hop + 1)]
 		arrive_mat = (np.stack(transfer_mat) > 0)

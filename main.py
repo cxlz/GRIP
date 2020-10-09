@@ -12,8 +12,9 @@ from datetime import datetime
 import random
 import itertools
 from tqdm import tqdm
+import time
 
-CUDA_VISIBLE_DEVICES='1'
+CUDA_VISIBLE_DEVICES='0'
 os.environ["CUDA_VISIBLE_DEVICES"] = CUDA_VISIBLE_DEVICES
 
 def seed_torch(seed=0):
@@ -35,9 +36,10 @@ future_frames = 6 # 3 second * 2 frame/second
 batch_size_train = 64 
 batch_size_val = 32
 batch_size_test = 1
-total_epoch = 50
-base_lr = 0.01
+total_epoch = 500
+base_lr = 0.001
 lr_decay_epoch = 5
+lr_decay = 0.5
 if torch.cuda.is_available():
     dev = torch.device("cuda")
     use_cuda = True
@@ -71,27 +73,31 @@ def display_result(pra_results, pra_pref='Train_epoch'):
 
 
 def visulize(outputs, targets, output_mask):
-    outputs *= 10 
-    targets *= 10
-    outputs = outputs.astype("int") + 256 
-    targets = targets.astype("int") + 256
+    outputs *= 5 
+    targets *= 5
+    outputs = outputs.astype("int") + 255 
+    targets = targets.astype("int") + 255
+    history_frame_num = targets.shape[2] - outputs.shape[2]
     for out, tar, mask in zip(outputs, targets, output_mask):
-        img = np.ones((512,512,3))
         for i in range(out.shape[-1]):
+            img = np.ones((512,512,3))
             if mask[0, 0, i] == 1:
-                for j in range(out.shape[1]):
-                    if mask[0, j, i] == 1:
-                        img = cv2.circle(img, (out[0,j,i], out[1,j,i]), 3, (0,0,255), thickness=2)
-                        img = cv2.circle(img, (tar[0,j,i], tar[1,j,i]), 3, (0,0,255), thickness=2)
+                for j in range(history_frame_num - 1):
+                    if (tar[0,j,i] != 255 or tar[1,j,i] != 255) and (tar[0,j + 1,i] != 255 or tar[1,j + 1,i] != 255):
+                        img = cv2.line(img, (tar[0,j,i], tar[1,j,i]), (tar[0,j + 1,i], tar[1,j + 1,i]), (0,0,255), thickness=2)
+                for j in range(history_frame_num, tar.shape[1]):
+                    img = cv2.circle(img, (tar[0,j,i], tar[1,j,i]), 3, (0,0,255), thickness=2)
+                    img = cv2.circle(img, (out[0,j - history_frame_num,i], out[1,j - history_frame_num,i]), 3, (255,0,0), thickness=2)
             else:
                 continue
             cv2.imshow("img", img)
-            cv2.waitKey(0)
+            cv2.waitKey(1)
 
     return
 
 def my_save_model(pra_model, pra_epoch):
-    path = '{}/model_epoch_{:04}.pt'.format(work_dir, pra_epoch)
+    model_time = time.strftime('%m%d_%H:%M:%S')
+    path = '{}/model_epoch_{:04}_{}.pt'.format(work_dir, pra_epoch, model_time)
     torch.save(
         {
             'xin_graph_seq2seq_model': pra_model.state_dict(),
@@ -160,12 +166,15 @@ def train_model(pra_model, pra_data_loader, pra_optimizer, pra_epoch_log):
     rescale_xy[:,1] = max_y
     loss_meter = meter.AverageValueMeter()
     # train model using training data
+    pre_loss = float("inf")
+
+    loss_meter.reset()
     for iteration, (ori_data, A, _) in enumerate(pra_data_loader):
         # print(iteration, ori_data.shape, A.shape)
         # ori_data: (N, C, T, V)
         # C = 11: [frame_id, object_id, object_type, position_x, position_y, position_z, object_length, pbject_width, pbject_height, heading] + [mask]
-        loss_meter.reset()
         data, no_norm_loc_data, object_type = preprocess_data(ori_data, rescale_xy)
+        # for now_history_frames in range(6, 7):
         for now_history_frames in range(1, data.shape[-2]):
             input_data = data[:,:,:now_history_frames,:] # (N, C, T, V)=(N, 4, 6, 120)
             output_loc_GT = data[:,:2,now_history_frames:,:] # (N, C, T, V)=(N, 2, 6, 120)
@@ -189,8 +198,9 @@ def train_model(pra_model, pra_data_loader, pra_optimizer, pra_epoch_log):
             pra_optimizer.zero_grad()
             total_loss.backward()
             pra_optimizer.step()
-            visulize(predicted.detach().cpu().numpy(), output_loc_GT.detach().cpu().numpy(), output_mask.detach().cpu().numpy())
+            # visulize(predicted.detach().cpu().numpy(), output_loc_GT.detach().cpu().numpy(), output_mask.detach().cpu().numpy())
         my_print('|{}|{:>20}|\tIteration:{:>5}|\tLoss:{:.8f}|lr: {}|'.format(datetime.now(), pra_epoch_log, iteration, loss_meter.value()[0] ,now_lr))
+    return loss_meter.value()[0]
 
         
 
@@ -237,6 +247,10 @@ def val_model(pra_model, pra_data_loader):
             for ind in range(1, predicted.shape[-2]):
                 predicted[:,:,ind] = torch.sum(predicted[:,:,ind-1:ind+1], dim=-2)
             predicted += ori_output_last_loc
+
+            now_pred = predicted.detach().cpu().numpy() # (N, C, T, V)=(N, 2, 6, 120)
+            now_ori_data = ori_data.detach().cpu().numpy() # (N, C, T, V)=(N, 11, 6, 120)
+            visulize(now_pred, now_ori_data[:, 3:5, :, :], now_ori_data[:, -1:, -1:, :])
 
             ### overall dist
             # overall_sum_time, overall_num, x2y2 = compute_RMSE(predicted, output_loc_GT, output_mask)        
@@ -325,6 +339,7 @@ def test_model(pra_model, pra_data_loader):
             now_mean_xy = mean_xy.detach().cpu().numpy() # (N, 2)
             now_ori_data = ori_data.detach().cpu().numpy() # (N, C, T, V)=(N, 11, 6, 120)
             now_mask = now_ori_data[:, -1, -1, :] # (N, V)
+            visulize(now_pred, now_ori_data[:, 3:5, :, :], now_ori_data[:, -1:, -1:, :])
             
             now_pred = np.transpose(now_pred, (0, 2, 3, 1)) # (N, T, V, 2)
             now_ori_data = np.transpose(now_ori_data, (0, 2, 3, 1)) # (N, T, V, 11)
@@ -354,15 +369,17 @@ def run_trainval(pra_model, pra_traindata_path, pra_testdata_path):
 
     # evaluate on testing data (observe 5 frame and predict 1 frame)
     loader_val = data_loader(pra_traindata_path, pra_batch_size=batch_size_val, pra_shuffle=False, pra_drop_last=False, train_val_test='val') 
-    
+    learning_rate = base_lr
     optimizer = optim.Adam(
         [{'params':model.parameters()},],) # lr = 0.0001)
-        
+    pre_loss = float("inf")
+    best_epoch = 0
     for now_epoch in range(total_epoch):
         all_loader_train = itertools.chain(loader_train, loader_test)
         
         my_print('#######################################Train')
-        train_model(pra_model, all_loader_train, pra_optimizer=optimizer, pra_epoch_log='Epoch:{:>4}/{:>4}'.format(now_epoch, total_epoch))
+        # now_loss = train_model(pra_model, loader_train, pra_optimizer=optimizer, pra_epoch_log='Epoch:{:>4}/{:>4}'.format(now_epoch, total_epoch))
+        now_loss = train_model(pra_model, all_loader_train, pra_optimizer=optimizer, pra_epoch_log='Epoch:{:>4}/{:>4}'.format(now_epoch, total_epoch))
         
         my_save_model(pra_model, now_epoch)
 
@@ -371,6 +388,16 @@ def run_trainval(pra_model, pra_traindata_path, pra_testdata_path):
             val_model(pra_model, loader_val),
             pra_pref='{}_Epoch{}'.format('Test', now_epoch)
         )
+        if now_loss < pre_loss:
+            pre_loss = now_loss
+            best_epoch = now_epoch
+        # else:
+            # learning_rate *= lr_decay
+            # if learning_rate < 1e-10:
+            #     print("best epoch: %d, best loss: %f"%(best_epoch, pre_loss))
+            #     break
+            # for param_group in optimizer.param_groups:
+            #     param_group["lr"] = learning_rate
 
 
 def run_test(pra_model, pra_data_path):
@@ -381,8 +408,11 @@ def run_test(pra_model, pra_data_path):
 
 if __name__ == '__main__':
     graph_args={'max_hop':2, 'num_node':120}
-    model = Model(in_channels=4, graph_args=graph_args, edge_importance_weighting=True, use_cuda=use_cuda)
+    model = Model(in_channels=4, graph_args=graph_args, edge_importance_weighting=True, use_cuda=use_cuda, dropout=0.5)
     model.to(dev)
+
+    # pretrained_model_path = './trained_models/model_epoch_0049.pt'
+    # model = my_load_model(model, pretrained_model_path)
 
     data_root = 'data/xincoder/ApolloScape/'
     train_data_path = os.path.join(data_root, 'prediction_train/train_data.pkl')
@@ -390,9 +420,7 @@ if __name__ == '__main__':
     # train and evaluate model
     run_trainval(model, pra_traindata_path=train_data_path, pra_testdata_path=test_data_path)
     
-    # pretrained_model_path = './trained_models/model_epoch_0016.pt'
-    # model = my_load_model(model, pretrained_model_path)
-    # run_test(model, './test_data.pkl')
+    # run_test(model, test_data_path)
     
         
         
