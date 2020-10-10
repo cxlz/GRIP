@@ -339,7 +339,6 @@ def test_model(pra_model, pra_data_loader):
             now_mean_xy = mean_xy.detach().cpu().numpy() # (N, 2)
             now_ori_data = ori_data.detach().cpu().numpy() # (N, C, T, V)=(N, 11, 6, 120)
             now_mask = now_ori_data[:, -1, -1, :] # (N, V)
-            visulize(now_pred, now_ori_data[:, 3:5, :, :], now_ori_data[:, -1:, -1:, :])
             
             now_pred = np.transpose(now_pred, (0, 2, 3, 1)) # (N, T, V, 2)
             now_ori_data = np.transpose(now_ori_data, (0, 2, 3, 1)) # (N, T, V, 11)
@@ -362,6 +361,7 @@ def test_model(pra_model, pra_data_loader):
                         # print(result)
                         writer.write(result)
 
+            visulize(now_pred, now_ori_data[:, 3:5, :, :], now_ori_data[:, -1:, -1:, :])
 
 def run_trainval(pra_model, pra_traindata_path, pra_testdata_path):
     loader_train = data_loader(pra_traindata_path, pra_batch_size=batch_size_train, pra_shuffle=True, pra_drop_last=True, train_val_test='train')
@@ -411,16 +411,16 @@ if __name__ == '__main__':
     model = Model(in_channels=4, graph_args=graph_args, edge_importance_weighting=True, use_cuda=use_cuda, dropout=0.5)
     model.to(dev)
 
-    # pretrained_model_path = './trained_models/model_epoch_0049.pt'
-    # model = my_load_model(model, pretrained_model_path)
+    pretrained_model_path = 'trained_models/model_epoch_0049.pt'
+    model = my_load_model(model, pretrained_model_path)
 
     data_root = 'data/xincoder/ApolloScape/'
     train_data_path = os.path.join(data_root, 'prediction_train/train_data.pkl')
     test_data_path = os.path.join(data_root, 'prediction_test/test_data.pkl')
     # train and evaluate model
-    run_trainval(model, pra_traindata_path=train_data_path, pra_testdata_path=test_data_path)
+    # run_trainval(model, pra_traindata_path=train_data_path, pra_testdata_path=test_data_path)
     
-    # run_test(model, test_data_path)
+    run_test(model, test_data_path)
     
         
         
