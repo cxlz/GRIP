@@ -46,9 +46,10 @@ class Graph_Conv_Block(nn.Module):
         #     )
         self.relu = nn.ReLU(inplace=False)
 
-    def forward(self, x, A):
+    def forward(self, x, A=None):
         res = x
-        x, A = self.gcn(x, A)
+        if not A is None:
+            x, A = self.gcn(x, A)
         x = self.tcn(x)
         x += res
         return self.relu(x), A

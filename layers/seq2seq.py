@@ -2,7 +2,10 @@ import torch
 import torch.nn as nn
 from torch.autograd import Variable
 import numpy as np 
+import time
+
 import config.configure as config
+from layers.attention import Attention
 
 ####################################################
 # Seq2Seq LSTM AutoEncoder Model
@@ -18,8 +21,8 @@ class EncoderRNN(nn.Module):
         # self.lstm = nn.LSTM(input_size, hidden_size, num_layers, batch_first=True)
         self.lstm = nn.GRU(input_size, hidden_size*30, num_layers, batch_first=True)
         
-    def forward(self, input, hidden):
-        output, hidden = self.lstm(input, hidden)
+    def forward(self, input):
+        output, hidden = self.lstm(input)
         return output, hidden
 
 class DecoderRNN(nn.Module):
@@ -29,7 +32,7 @@ class DecoderRNN(nn.Module):
         self.output_size = output_size
         self.num_layers = num_layers
         self.isCuda = isCuda
-        self.lstm = nn.LSTM(hidden_size, output_size, num_layers, batch_first=True)
+        # self.lstm = nn.LSTM(hidden_size, output_size, num_layers, batch_first=True)
         self.lstm = nn.GRU(hidden_size, output_size*30, num_layers, batch_first=True)
 
         #self.relu = nn.ReLU()
@@ -55,20 +58,31 @@ class Seq2Seq(nn.Module):
         self.pred_length = 6
         self.encoder = EncoderRNN(input_size, hidden_size, num_layers, isCuda)
         self.decoder = DecoderRNN(hidden_size, hidden_size, num_layers, dropout, isCuda)
-    
-    def forward(self, in_data, last_location, pred_length:int=6): #, teacher_forcing_ratio:int=0, teacher_location=torch.zeros(1)
+        self.encoder_map = EncoderRNN(input_size, hidden_size, num_layers, isCuda)
+        self.attention = Attention(hidden_size*30)
+
+    def forward(self, in_data, last_location, map_data, pred_length:int=6, map_mask=None): #, teacher_forcing_ratio:int=0, teacher_location=torch.zeros(1)
         batch_size = in_data.shape[0]
         out_dim = self.decoder.output_size
         self.pred_length = pred_length
 
         outputs = torch.zeros(batch_size, self.pred_length, out_dim)
-        hidden = torch.zeros(self.encoder.lstm.num_layers, batch_size, self.encoder.lstm.hidden_size)
-        # if self.isCuda:
-        outputs = outputs.cuda()    
-        hidden = hidden.cuda()
-            
+        # hidden = torch.zeros(self.encoder.lstm.num_layers, batch_size, self.encoder.lstm.hidden_size)
+        if self.isCuda:
+            outputs = outputs.cuda()    
+            # hidden = hidden.cuda()
+            #    
+        encoded_output, hidden = self.encoder(in_data)
 
-        encoded_output, hidden = self.encoder(in_data, hidden)
+        map_encoded_output, map_hidden = self.encoder(map_data)
+
+
+        map_hidden, att = self.attention(hidden, map_hidden, map_mask)
+
+        # att = att.view(att.shape[0], V, C, mV, C)
+        att = torch.mean(att, dim=[2,4])
+        hidden += map_hidden
+        # hidden = torch.cat((hidden, map_hidden), dim=-1)
         decoder_input = last_location
         for t in range(self.pred_length):
             # encoded_input = torch.cat((now_label, encoded_input), dim=-1) # merge class label into input feature
@@ -78,7 +92,9 @@ class Seq2Seq(nn.Module):
             # teacher_force = np.random.random() < teacher_forcing_ratio
             # decoder_input = (teacher_location[:,t:t+1] if (teacher_location.dim() > 1) and teacher_force else now_out)
             decoder_input = now_out
-        return outputs
+
+        # att = None
+        return outputs, att
 
 ####################################################
 ####################################################

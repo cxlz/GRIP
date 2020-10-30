@@ -4,3 +4,6 @@ __pycache__
 *.pt
 *.pkl
 trained_models/
+*_pb2.py
+*.bin
+*.proto
