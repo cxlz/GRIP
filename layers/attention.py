@@ -69,7 +69,7 @@ class Attention(nn.Module):
             a = torch.zeros_like(ans).cuda().float()
             for i in range(ans.shape[0]):
                 a[i:i+1,:,bool_mask[i,0,:,0],:] = F.softmax(ans[i:i+1,:,bool_mask[i,0,:,0],:], dim=2)
-                # argmax_att = torch.argmax(torch.mean(a[i], dim=-1), dim=-1)
+                argmax_att = torch.argmax(torch.mean(a[i], dim=-1), dim=-1)
             ans = a
         else:
             ans = F.softmax(ans, dim=2)
@@ -82,7 +82,9 @@ class Attention(nn.Module):
         ans = ans.view(N*V, T, -1)  
         ans = ans.permute(1, 0, 2) 
 
-        att = att.view(N, V, T, mV, mT).contiguous()
+        att = att.view(N, V, T, mV, mT)
+        att = torch.mean(att, dim=[2,4])
+        # att = torch.max(torch.max(att, dim=2)[0], dim=-1)[0]
         # ans.squeeze_(1)
 
         return ans, att

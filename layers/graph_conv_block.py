@@ -51,6 +51,6 @@ class Graph_Conv_Block(nn.Module):
         if not A is None:
             x, A = self.gcn(x, A)
         x = self.tcn(x)
-        x += res
+        x = x + res
         return self.relu(x), A
 

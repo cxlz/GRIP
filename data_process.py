@@ -6,6 +6,7 @@ import pickle
 from tqdm import tqdm
 
 from argoverse.map_representation.map_api import ArgoverseMap
+from argoverse.utils import centerline_utils
 
 import config.configure as config
 from util.map_util import HDMap, LaneSegment
@@ -63,11 +64,61 @@ def get_frame_instance_dict(pra_file_path):
     return now_dict, city
 
 
-def process_map_data(center, search_radius, point_num, city=""):
+def get_current_lane(trajectory, centerlines):
+    centerlines = np.array(centerlines[:, :, 3:5])
+    min_dist = float("inf")
+    for i in range(centerlines.shape[0]):
+        curr_dist = 0
+        segment = centerlines[i]
+        for j in range(trajectory.shape[0]):
+            traj = trajectory[j:j+1]
+            curr_dist += np.min(np.sqrt(np.sum((segment - traj) ** 2, axis=1)))
+        if curr_dist < min_dist:
+            curr_lane = i
+            min_dist = curr_dist
+
+    return curr_lane
+
+
+def process_map_data(center, search_radius, point_num, mean_xy, city=""):
     global map_num
     map_feature_list = []
     if config.map_type == "argo":
-        idList = avm.get_lane_ids_in_xy_bbox(center[0], center[1], city, search_radius)
+        # curr_lane = avm.get_nearest_centerline(center, city, visualize=True)
+
+        if config.only_nearby_lanes:
+            idList = []
+            while not idList:
+                idList = avm.get_lane_ids_in_xy_bbox(center[0], center[1], city, search_radius)
+                search_radius *= 2
+            idList = np.array(idList, dtype="int")
+            nearby_lane_objs = [avm.city_lane_centerlines_dict[city][lane_id] for lane_id in idList]
+            per_lane_dists, min_dist_nn_indices, _ = centerline_utils.lane_waypt_to_query_dist(center, nearby_lane_objs)
+
+            curr_lane_ids = idList[per_lane_dists < 2]
+            nearest_lane = idList[min_dist_nn_indices[0]]
+            if nearest_lane not in curr_lane_ids:
+                curr_lane_ids = np.append(curr_lane_ids, nearest_lane)
+            idList = []
+            for lane_id in curr_lane_ids:
+                if lane_id not in idList:
+                    idList.append(lane_id)
+                curr_lane = avm.city_lane_centerlines_dict[city][lane_id]
+                if not curr_lane.l_neighbor_id is None and curr_lane.l_neighbor_id not in idList:
+                    idList.append(curr_lane.l_neighbor_id)
+                if not curr_lane.r_neighbor_id is None and curr_lane.r_neighbor_id not in idList:
+                    idList.append(curr_lane.r_neighbor_id)
+                if not curr_lane.predecessors is None:
+                    for p_id in curr_lane.predecessors:
+                        if p_id not in idList:
+                            idList.append(p_id)
+                # if not curr_lane.successors is None:
+                #     for s_id in curr_lane.successors:
+                #         if s_id not in idList:
+                #             idList.append(s_id)
+        else:
+            idList = np.array(avm.get_lane_ids_in_xy_bbox(mean_xy[0], mean_xy[1], city, search_radius), dtype="int")
+        
         for l, id in enumerate(idList):
             lane = avm.city_lane_centerlines_dict[city][id]
             t = 0
@@ -78,9 +129,30 @@ def process_map_data(center, search_radius, point_num, city=""):
             segment = lane.centerline
             now_map_feature = np.zeros((point_num, total_feature_dimension))
             for i in range(segment.shape[0]):
-                now_map_feature[i] = np.array([l, 0, 0, segment[i][0] - center[0], segment[i][1] - center[1], 0, 0, 0, 0, t, 1], dtype="float")
-            map_feature_list.append(now_map_feature)
-
+                curr_frame = np.array([l, 0, 0, segment[i][0] - mean_xy[0], segment[i][1] - mean_xy[1], 0, 0, 0, 0, t, 1], dtype="float")
+                now_map_feature[i] = curr_frame
+            last_frame = curr_frame
+            # for i in range(segment.shape[0], now_map_feature.shape[0]):
+            #     now_map_feature[i] = last_frame
+            # map_feature_list.append(now_map_feature)
+            i += 1
+            
+            if not lane.successors is None:
+                for s_id in lane.successors:
+                    s_lane = avm.city_lane_centerlines_dict[city][s_id]
+                    s_segment = s_lane.centerline
+                    for j in range(s_segment.shape[0]):
+                        curr_frame = np.array([l, 0, 0, s_segment[j][0] - mean_xy[0], s_segment[j][1] - mean_xy[1], 0, 0, 0, 0, t, 1], dtype="float")
+                        now_map_feature[i + j] = curr_frame
+                    last_frame = curr_frame
+                    j += 1
+                    for jj in range(i + j, now_map_feature.shape[0]):
+                        now_map_feature[jj] = last_frame
+                    map_feature_list.append(now_map_feature)
+            else:
+                for j in range(i, now_map_feature.shape[0]):
+                    now_map_feature[i] = last_frame
+                map_feature_list.append(now_map_feature)
     else:
         lane_list = hdmap.get_lanes(center, search_radius, point_num)
         for l, lane in enumerate(lane_list):
@@ -89,7 +161,7 @@ def process_map_data(center, search_radius, point_num, city=""):
                 now_map_feature = np.zeros((point_num, total_feature_dimension))
                 segment = np.array(segment).astype("float")
                 for i in range(segment.shape[0]):
-                    now_map_feature[i] = np.array([l, 0, 0, segment[i][0] - center[0], segment[i][1] - center[1], 0, 0, 0, 0, lane.turn, 1], dtype="float")
+                    now_map_feature[i] = np.array([l, 0, 0, segment[i][0] - mean_xy[0], segment[i][1] - mean_xy[1], 0, 0, 0, 0, lane.turn, 1], dtype="float")
                 map_feature_list.append(now_map_feature)
 
     map_feature_list = np.array(map_feature_list, dtype="float")
@@ -135,7 +207,12 @@ def process_data(pra_now_dict, pra_start_ind, pra_end_ind, pra_observed_last, ci
 
     # object_feature_list has shape of (frame#, object#, 11) 11 = 10features + 1mark
     object_feature_list = np.array(object_feature_list)
-    map_feature_list = process_map_data(m_xy, config.lane_search_radius, config.segment_point_num, city)
+
+    ego_position = object_feature_list[history_frames, 0, 3:5] + m_xy
+    ego_trajectory = object_feature_list[:, 0, 3:5]
+
+    map_feature_list = process_map_data(ego_position, config.lane_search_radius, config.segment_point_num, m_xy, city)
+    curr_lane = get_current_lane(ego_trajectory, map_feature_list)
     # object feature with a shape of (frame#, object#, 11) -> (object#, frame#, 11)
     object_frame_feature = np.zeros((max_num_object, round((pra_end_ind-pra_start_ind) / frame_steps), total_feature_dimension))
 
@@ -148,7 +225,7 @@ def process_data(pra_now_dict, pra_start_ind, pra_end_ind, pra_observed_last, ci
     # np.transpose(object_feature_list, (1,0,2))
     object_frame_feature[:num_visible_object+num_non_visible_object] = np.transpose(object_feature_list, (1,0,2))
     
-    return object_frame_feature, neighbor_matrix, m_xy, map_frame_feature
+    return object_frame_feature, neighbor_matrix, m_xy, map_frame_feature, curr_lane
     
 
 def generate_train_data(pra_file_path):
@@ -168,6 +245,7 @@ def generate_train_data(pra_file_path):
     all_adjacency_list = []
     all_mean_list = []
     all_map_list = []
+    all_lane_list = []
     for start_ind in frame_id_set[:-total_frames+1:frame_steps]:
         start_ind = int(start_ind)
         end_ind = int(start_ind + total_frames * frame_steps)
@@ -176,23 +254,25 @@ def generate_train_data(pra_file_path):
             if ind not in frame_id_set:
                 break
         else:
-            object_frame_feature, neighbor_matrix, mean_xy, map_frame_feature= process_data(now_dict, start_ind, end_ind, observed_last, city)
+            object_frame_feature, neighbor_matrix, mean_xy, map_frame_feature, curr_lane= process_data(now_dict, start_ind, end_ind, observed_last, city)
 
             all_feature_list.append(object_frame_feature)
             all_adjacency_list.append(neighbor_matrix)    
             all_mean_list.append(mean_xy)  
-            all_map_list.append(map_frame_feature)  
+            all_map_list.append(map_frame_feature) 
+            all_lane_list.append(curr_lane) 
 
     # (N, V, T, C) --> (N, C, T, V)
     all_feature_list = np.array(all_feature_list)
     all_adjacency_list = np.array(all_adjacency_list)
     all_mean_list = np.array(all_mean_list)
     all_map_list = np.array(all_map_list)
+    all_lane_list = np.array(all_lane_list)
     if all_feature_list.shape[0] > 0:
         all_feature_list = np.transpose(all_feature_list, (0, 3, 2, 1))
         all_map_list = np.transpose(all_map_list, (0, 3, 2, 1))
     # print(all_feature_list.shape, all_adjacency_list.shape)
-    return all_feature_list, all_adjacency_list, all_mean_list, all_map_list
+    return all_feature_list, all_adjacency_list, all_mean_list, all_map_list, all_lane_list
 
 
 def generate_test_data(pra_file_path):
@@ -263,8 +343,10 @@ def generate_data(pra_file_path_list, pra_is_train=True):
     # save training_data and trainjing_adjacency into a file.
     if pra_is_train:
         save_path = os.path.join(data_root, train_data_path, config.train_data_file)
+        print("saving train data: [%s]"%save_path)
     else:
         save_path = os.path.join(data_root, test_data_path, config.test_data_file)
+        print("saving test data: [%s]"%save_path)
     with open(save_path, 'wb') as writer:
         pickle.dump([all_data, all_adjacency, all_mean_xy, all_map_data], writer)
 

@@ -9,26 +9,29 @@ history_frames = 15 # 3 second * 2 frame/second
 future_frames = 10 # 3 second * 2 frame/second
 # xy_range = 120 # max_x_range=121, max_y_range=118
 max_num_object = 150 # maximum number of observed objects is 70
-max_num_map = 100
+max_num_map = 32 # nearby_lanes 32
 neighbor_distance = 10 # meter
 
 # map param
-lane_search_radius = 20
-segment_point_num = 10
+only_nearby_lanes = True
+lane_search_radius = 4
+segment_point_num = 20
 map_path = "util/map/base_map.bin"
 map_type = "argo"
 
 
 # data_root = 'data/our_data/0908'
-data_root = 'data/argo/turn'
-# data_root = 'data/argo/no_slow_obj_grip'
+data_root = '/datastore/data/cxl/GRIP/data/argo/turn'
+# data_root = '/datastore/data/cxl/GRIP/data/argo/no_slow_obj_grip'
 # data_root = "data/xincoder/ApolloScape"
 work_dir = 'trained_models/argo/turn'
 train_data_path = "prediction_train/"
 test_data_path = "prediction_test/"
-train_data_file = 'train_data_%d_%d_%d.pkl'%(frame_steps, history_frames, future_frames)
-test_data_file = 'test_data_%d_%d_%d.pkl'%(frame_steps, history_frames, future_frames)
-save_model_prefix = "model_argo_turn_map_layer1_"
+# train_data_file = 'train_data_%d_%d_%d.pkl'%(frame_steps, history_frames, future_frames)
+# test_data_file = 'test_data_%d_%d_%d.pkl'%(frame_steps, history_frames, future_frames)
+train_data_file = 'train_data_%d_%d_%d_%d.pkl'%(frame_steps, history_frames, future_frames, lane_search_radius)
+test_data_file = 'test_data_%d_%d_%d_%d.pkl'%(frame_steps, history_frames, future_frames, lane_search_radius)
+save_model_prefix = "model_argo_turn_near4_"
 
 
 
@@ -55,11 +58,11 @@ max_hop = 2
 num_node = max_num_object
 graph_args={'max_hop':max_hop, 'num_node':num_node}
 
-train = True
+train = False
 load_model = False
 vel_mode = True
 convert_model = False
-pretrained_model_path = 'trained_models/argo/turn/model_argo_map_gcn_1029_13:26:58_epoch_0020.pt'
+pretrained_model_path = 'trained_models/argo/turn/model_argo_turn_near4_1031_16:13:21_epoch_0020.pt'
 view = True 
 save_view = True
 save_view_path = os.path.join(work_dir, "view", pretrained_model_path.split(".")[0].split("/")[-1])
@@ -73,7 +76,7 @@ spatial_kernel_size = max_hop + 1
 temporal_kernel_size = 5
 gcn_hidden_size = 64
 seq2seq_dropout = 0.5
-num_lstm_layers = 1
+num_lstm_layers = 2
 encoder_input_size = gcn_hidden_size
 encoder_hidden_size = 30
 out_dim_per_node = 2

@@ -95,8 +95,10 @@ def visulize(outputs, targets, output_mask, lanes=None, att=None):
                     lane = lanes[idx].copy() # C' T' V'
                     max_xy = np.max(np.max(lane, axis=-1), axis=-1)
                     min_xy = np.min(np.min(lane, axis=-1), axis=-1)
+                    # max_xy[max_xy>20] = 20
+                    # min_xy[min_xy<-20] = -20
                     mean_xy = (max_xy + min_xy) / 2
-                    scale_val = np.max(max_xy) / 200
+                    scale_val =  max(np.max(np.abs(max_xy)), np.max(np.abs(min_xy))) / 200
                     if scale_val == 0:
                         continue 
                     offset = 255 - ((mean_xy - min_xy).reshape((2,1)) / scale_val)
@@ -109,21 +111,21 @@ def visulize(outputs, targets, output_mask, lanes=None, att=None):
                     a = att[idx, i]
                     argmax_a = np.argmax(a, axis=-1)
                     for ii in range(lane.shape[-1]):
-                        # if a[ii] == 0:
-                        #     continue
+                        if a[ii] == 0:
+                            continue
                         segment = (lane[:,:,ii] - min_xy) / scale_val + offset
                         segment = segment.astype("int")
                         for jj in range(segment.shape[-1] - 1):
                             color = (0,0,0) 
                             thickness = 1
                             if abs(a[ii] - a[argmax_a]) < 1e-6:
-                                color = (0,0,255)
+                                color = (0,255,0)
                                 thickness = 2   
                             p1 = segment[:,jj]
                             p2 = segment[:, jj + 1]
                             if (p1[0] != zero_pos[0] or p1[1] != zero_pos[1]) and (p2[0] != zero_pos[0] or p2[1] != zero_pos[1]):
                                 img = cv2.line(img, (p1[0], p1[1]), (p2[0], p2[1]), color, thickness)
-                            if jj == segment.shape[-1] * ii // lane.shape[-1]:
+                            if (a[ii] > 0.2 or abs(a[ii] - a[argmax_a]) < 1e-6) and jj == segment.shape[-1] * ii // lane.shape[-1]:
                                 img = cv2.putText(img, "%.2f"%a[ii], (p1[0], p1[1]), cv2.FONT_HERSHEY_COMPLEX, 0.3, (0,0,0), 1)
                         # cv2.imshow("img_grip", img)
                         # cv2.waitKey(1)
@@ -250,6 +252,7 @@ def train_model(pra_model, pra_data_loader, pra_optimizer, pra_epoch_log):
     # train model using training data
 
     loss_meter.reset()
+    torch.autograd.set_detect_anomaly(True)
     for iteration, (ori_data, A, _, ori_map_data) in enumerate(pra_data_loader):
         # print(iteration, ori_data.shape, A.shape)
         # ori_data: (N, C, T, V)

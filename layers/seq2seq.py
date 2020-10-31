@@ -75,14 +75,15 @@ class Seq2Seq(nn.Module):
         encoded_output, hidden = self.encoder(in_data)
 
         map_encoded_output, map_hidden = self.encoder(map_data)
-
+        
 
         map_hidden, att = self.attention(hidden, map_hidden, map_mask)
 
-        # att = att.view(att.shape[0], V, C, mV, C)
-        att = torch.mean(att, dim=[2,4])
-        hidden += map_hidden
+        # att = att.view(att.shape[0], att.shape[1] // 2, 2, -1, 2)
+        # att = torch.mean(att, dim=[2,4])
+        hidden = hidden + map_hidden
         # hidden = torch.cat((hidden, map_hidden), dim=-1)
+        hidden = torch.tanh(hidden)
         decoder_input = last_location
         for t in range(self.pred_length):
             # encoded_input = torch.cat((now_label, encoded_input), dim=-1) # merge class label into input feature
