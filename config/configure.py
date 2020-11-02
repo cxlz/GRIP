@@ -5,8 +5,8 @@ import os
 total_feature_dimension = 10 + 1
 data_time_resolution = 0.1
 frame_steps = 2
-history_frames = 15 # 3 second * 2 frame/second
-future_frames = 10 # 3 second * 2 frame/second
+history_frames = 10 # 3 second * 2 frame/second
+future_frames = 15 # 3 second * 2 frame/second
 # xy_range = 120 # max_x_range=121, max_y_range=118
 max_num_object = 150 # maximum number of observed objects is 70
 max_num_map = 32 # nearby_lanes 32
@@ -21,18 +21,17 @@ map_type = "argo"
 
 
 # data_root = 'data/our_data/0908'
-data_root = '/datastore/data/cxl/GRIP/data/argo/turn'
+data_root = '/datastore/data/cxl/GRIP/data/argo/all'
 # data_root = '/datastore/data/cxl/GRIP/data/argo/no_slow_obj_grip'
 # data_root = "data/xincoder/ApolloScape"
-work_dir = 'trained_models/argo/turn'
+work_dir = 'trained_models/argo/all'
 train_data_path = "prediction_train/"
 test_data_path = "prediction_test/"
 # train_data_file = 'train_data_%d_%d_%d.pkl'%(frame_steps, history_frames, future_frames)
 # test_data_file = 'test_data_%d_%d_%d.pkl'%(frame_steps, history_frames, future_frames)
 train_data_file = 'train_data_%d_%d_%d_%d.pkl'%(frame_steps, history_frames, future_frames, lane_search_radius)
 test_data_file = 'test_data_%d_%d_%d_%d.pkl'%(frame_steps, history_frames, future_frames, lane_search_radius)
-save_model_prefix = "model_argo_turn_near4_"
-
+save_model_prefix = "model_argo_all_near4label_cat_"
 
 
 
@@ -57,12 +56,13 @@ test_result_file = 'prediction_result.txt'
 max_hop = 2
 num_node = max_num_object
 graph_args={'max_hop':max_hop, 'num_node':num_node}
+loss_weight = [1, 1]
 
-train = False
+train = True
 load_model = False
 vel_mode = True
 convert_model = False
-pretrained_model_path = 'trained_models/argo/turn/model_argo_turn_near4_1031_16:13:21_epoch_0020.pt'
+pretrained_model_path = 'trained_models/argo/all/view/model_argo_all_near4label_cat_1101_21:45:46_epoch_0005'
 view = True 
 save_view = True
 save_view_path = os.path.join(work_dir, "view", pretrained_model_path.split(".")[0].split("/")[-1])

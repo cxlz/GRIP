@@ -248,12 +248,13 @@ def train_model(pra_model, pra_data_loader, pra_optimizer, pra_epoch_log):
     rescale_xy = torch.ones((1,2,1,1)).to(dev)
     rescale_xy[:,0] = max_x
     rescale_xy[:,1] = max_y
+    celossfunc = torch.nn.NLLLoss()
     loss_meter = meter.AverageValueMeter()
     # train model using training data
 
     loss_meter.reset()
     torch.autograd.set_detect_anomaly(True)
-    for iteration, (ori_data, A, _, ori_map_data) in enumerate(pra_data_loader):
+    for iteration, (ori_data, A, _, ori_map_data, lane_label) in enumerate(pra_data_loader):
         # print(iteration, ori_data.shape, A.shape)
         # ori_data: (N, C, T, V)
         # C = 11: [frame_id, object_id, object_type, position_x, position_y, position_z, object_length, pbject_width, pbject_height, heading] + [mask]
@@ -261,6 +262,7 @@ def train_model(pra_model, pra_data_loader, pra_optimizer, pra_epoch_log):
         # rescale_xy[:,:,0,0] = max_xy
         data, no_norm_loc_data, object_type = preprocess_data(ori_data, rescale_xy)
         map_data, _, _, = preprocess_data(ori_map_data, rescale_xy)
+        lane_label = torch.argmax(lane_label, dim=1).long().to(dev)
         # for now_history_frames in range(history_frames, history_frames + 1):
         for now_history_frames in range(1, data.shape[-2]):
             input_data = data[:,:,:now_history_frames,:] # (N, C, T, V)=(N, 4, 6, 120)
@@ -280,9 +282,21 @@ def train_model(pra_model, pra_data_loader, pra_optimizer, pra_epoch_log):
             ########################################################
             # We use abs to compute loss to backward update weights
             # (N, T), (N, T)
+            att = att[:,0]
+            # celoss = 0
+            # for i in range(att.shape[0]):
+            #     a = att[i].clone().view((1, -1))
+            #     label = lane_label[i:i+1].clone()
+            #     celoss += celossfunc(torch.log(a), label)
+            # celoss = celoss / att.shape[0]
+            # log_att = torch.zeros_like(att).to(dev).float()
+            # idx = att > 0
+            # log_att[idx] = torch.log(att[idx])
+            celoss = celossfunc(att, lane_label)
             overall_sum_time, overall_num, _ = compute_RMSE(predicted[:,:,:,0:1], output_loc_GT[:,:,:,0:1], output_mask[:,:,:,0:1], pra_error_order=2)
             # overall_loss
             total_loss = torch.sum(overall_sum_time) / torch.max(torch.sum(overall_num), torch.ones(1,).to(dev)) #(1,)
+            total_loss = config.loss_weight[0] * total_loss + config.loss_weight[1] * celoss
             loss_meter.add(total_loss.item())
             now_lr = [param_group['lr'] for param_group in pra_optimizer.param_groups][0]
             
@@ -312,14 +326,16 @@ def val_model(pra_model, pra_data_loader):
     all_human_num_list = []
     all_bike_sum_list = []
     all_bike_num_list = []
+    celossfunc = torch.nn.NLLLoss()
     # train model using training data
-    for iteration, (ori_data, A, _, ori_map_data) in enumerate(pra_data_loader):
+    for iteration, (ori_data, A, _, ori_map_data, lane_label) in enumerate(pra_data_loader):
         # data: (N, C, T, V)
         # C = 11: [frame_id, object_id, object_type, position_x, position_y, position_z, object_length, pbject_width, pbject_height, heading] + [mask]
         # max_xy = torch.max(torch.max(torch.max(torch.abs(ori_data[:,3:5]), dim=2)[0], dim=-1)[0], dim=0)[0]
         # rescale_xy[:,:,0,0] = max_xy
         data, no_norm_loc_data, _ = preprocess_data(ori_data, rescale_xy)
         map_data, _, _, = preprocess_data(ori_map_data, rescale_xy)
+        lane_label = torch.argmax(lane_label, dim=1).long().to(dev)
         for now_history_frames in range(history_frames, history_frames + 1):
             input_data = data[:,:,:now_history_frames,:] # (N, C, T, V)=(N, 4, 6, 120)
             output_loc_GT = data[:,:2,now_history_frames:,:] # (N, C, T, V)=(N, 2, 6, 120)
@@ -413,15 +429,17 @@ def test_model(pra_model, pra_data_loader):
     rescale_xy[:,1] = max_y
     all_overall_sum_list = []
     all_overall_num_list = []
+    celossfunc = torch.nn.NLLLoss()
     with open(test_result_file, 'w') as writer:
         # train model using training data
-        for ori_data, A, mean_xy, ori_map_data in tqdm(pra_data_loader):
+        for ori_data, A, mean_xy, ori_map_data, lane_label in tqdm(pra_data_loader):
             # data: (N, C, T, V)
             # C = 11: [frame_id, object_id, object_type, position_x, position_y, position_z, object_length, pbject_width, pbject_height, heading] + [mask]
-            # max_xy = torch.max(torch.max(torch.max(torch.abs(ori_data[:,3:5,:,0:1]), dim=2)[0], dim=-1)[0], dim=0)[0]
+            # max_xy = torch.max(torch.max(torch.max(torch.abs(ori_data[:,3:5]), dim=2)[0], dim=-1)[0], dim=0)[0]
             # rescale_xy[:,:,0,0] = max_xy
             data, no_norm_loc_data, _ = preprocess_data(ori_data, rescale_xy)
             map_data, _, _, = preprocess_data(ori_map_data, rescale_xy)
+            lane_label = torch.argmax(lane_label, dim=1).long().to(dev)
             input_data = data[:,:,:history_frames,:] # (N, C, T, V)=(N, 4, 6, 120)
             output_mask = data[:,-1:,history_frames:,:] # (N, V)=(N, 120)
             # print(data.shape, A.shape, mean_xy.shape, input_data.shape)
@@ -439,6 +457,7 @@ def test_model(pra_model, pra_data_loader):
                 for ind in range(1, predicted.shape[-2]):
                     predicted[:,:,ind] = torch.sum(predicted[:,:,ind-1:ind+1], dim=-2)
                 predicted += ori_output_last_loc
+            celoss = celossfunc(torch.log(att[:,0]), lane_label)
 
             ### overall dist
             # overall_sum_time, overall_num, x2y2 = compute_RMSE(predicted, output_loc_GT, output_mask)        
@@ -528,13 +547,13 @@ def run_trainval(pra_model, pra_traindata_path, pra_testdata_path):
         if overall_loss_time < pre_loss:
             pre_loss = overall_loss_time
             best_epoch = now_epoch
-        else:
-            learning_rate *= lr_decay
-            if learning_rate < 1e-10:
-                my_print("best epoch: %d, best loss: %f"%(best_epoch, pre_loss))
-                break
-            for param_group in optimizer.param_groups:
-                param_group["lr"] = learning_rate
+        # else:
+        #     learning_rate *= lr_decay
+        #     if learning_rate < 1e-10:
+        #         my_print("best epoch: %d, best loss: %f"%(best_epoch, pre_loss))
+        #         break
+        #     for param_group in optimizer.param_groups:
+        #         param_group["lr"] = learning_rate
         my_print("now_train_loss: %f, best epoch: %d, best val loss: %f"%(now_loss, best_epoch, pre_loss))
 
 

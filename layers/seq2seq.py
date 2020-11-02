@@ -79,8 +79,14 @@ class Seq2Seq(nn.Module):
 
         map_hidden, att = self.attention(hidden, map_hidden, map_mask)
 
-        # att = att.view(att.shape[0], att.shape[1] // 2, 2, -1, 2)
-        # att = torch.mean(att, dim=[2,4])
+
+        # N, V, mV = att.shape
+        # argmax_att = torch.argmax(att, dim=-1)
+        # for i in range(N):
+        #     iv = i * V
+        #     imv = i * mV
+        #     for j in range(V):
+        #         hidden[:, iv + j] = hidden[:, iv + j] + map_hidden[:, imv + argmax_att[i, j]]
         hidden = hidden + map_hidden
         # hidden = torch.cat((hidden, map_hidden), dim=-1)
         hidden = torch.tanh(hidden)

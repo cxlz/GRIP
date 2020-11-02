@@ -74,10 +74,10 @@ def get_current_lane(trajectory, centerlines):
             traj = trajectory[j:j+1]
             curr_dist += np.min(np.sqrt(np.sum((segment - traj) ** 2, axis=1)))
         if curr_dist < min_dist:
-            curr_lane = i
+            curr_lane_id = i
             min_dist = curr_dist
 
-    return curr_lane
+    return curr_lane_id
 
 
 def process_map_data(center, search_radius, point_num, mean_xy, city=""):
@@ -208,15 +208,19 @@ def process_data(pra_now_dict, pra_start_ind, pra_end_ind, pra_observed_last, ci
     # object_feature_list has shape of (frame#, object#, 11) 11 = 10features + 1mark
     object_feature_list = np.array(object_feature_list)
 
-    ego_position = object_feature_list[history_frames, 0, 3:5] + m_xy
+    ego_position = object_feature_list[history_frames - 1, 0, 3:5] + m_xy
     ego_trajectory = object_feature_list[:, 0, 3:5]
 
     map_feature_list = process_map_data(ego_position, config.lane_search_radius, config.segment_point_num, m_xy, city)
-    curr_lane = get_current_lane(ego_trajectory, map_feature_list)
+    curr_lane_id = get_current_lane(ego_trajectory, map_feature_list)
+    # if curr_lane_id >= 10:
+    #     print(curr_lane_id)
     # object feature with a shape of (frame#, object#, 11) -> (object#, frame#, 11)
     object_frame_feature = np.zeros((max_num_object, round((pra_end_ind-pra_start_ind) / frame_steps), total_feature_dimension))
 
     map_frame_feature = np.zeros((max_num_map, config.segment_point_num, total_feature_dimension))
+    curr_lane_label = np.zeros(max_num_map)
+    curr_lane_label[curr_lane_id] = 1
     try:
         map_frame_feature[:map_feature_list.shape[0]] = map_feature_list
     except:
@@ -225,7 +229,7 @@ def process_data(pra_now_dict, pra_start_ind, pra_end_ind, pra_observed_last, ci
     # np.transpose(object_feature_list, (1,0,2))
     object_frame_feature[:num_visible_object+num_non_visible_object] = np.transpose(object_feature_list, (1,0,2))
     
-    return object_frame_feature, neighbor_matrix, m_xy, map_frame_feature, curr_lane
+    return object_frame_feature, neighbor_matrix, m_xy, map_frame_feature, curr_lane_label
     
 
 def generate_train_data(pra_file_path):
@@ -254,13 +258,13 @@ def generate_train_data(pra_file_path):
             if ind not in frame_id_set:
                 break
         else:
-            object_frame_feature, neighbor_matrix, mean_xy, map_frame_feature, curr_lane= process_data(now_dict, start_ind, end_ind, observed_last, city)
+            object_frame_feature, neighbor_matrix, mean_xy, map_frame_feature, curr_lane_label = process_data(now_dict, start_ind, end_ind, observed_last, city)
 
             all_feature_list.append(object_frame_feature)
             all_adjacency_list.append(neighbor_matrix)    
             all_mean_list.append(mean_xy)  
             all_map_list.append(map_frame_feature) 
-            all_lane_list.append(curr_lane) 
+            all_lane_list.append(curr_lane_label) 
 
     # (N, V, T, C) --> (N, C, T, V)
     all_feature_list = np.array(all_feature_list)
@@ -319,26 +323,29 @@ def generate_data(pra_file_path_list, pra_is_train=True):
     all_adjacency = []
     all_mean_xy = []
     all_map_data = []
+    all_lane_label = []
     for file_path in tqdm(pra_file_path_list):
         # print(file_path)
         if pra_is_train:
-            now_data, now_adjacency, now_mean_xy, now_map_data = generate_train_data(file_path)
+            now_data, now_adjacency, now_mean_xy, now_map_data, now_lane_label = generate_train_data(file_path)
         else:
-            now_data, now_adjacency, now_mean_xy, now_map_data = generate_train_data(file_path)
+            now_data, now_adjacency, now_mean_xy, now_map_data, now_lane_label = generate_train_data(file_path)
         if now_data.shape[0] > 0:
             all_data.extend(now_data)
             all_adjacency.extend(now_adjacency)
             all_mean_xy.extend(now_mean_xy)
             all_map_data.extend(now_map_data)
+            all_lane_label.extend(now_lane_label)
 
     all_data = np.array(all_data) #(N, C, T, V)=(5010, 11, 12, 70) Train
     all_adjacency = np.array(all_adjacency) #(5010, 70, 70) Train
     all_mean_xy = np.array(all_mean_xy) #(5010, 2) Train
     all_map_data = np.array(all_map_data)
+    all_lane_label = np.array(all_lane_label)
 
     # Train (N, C, T, V)=(5010, 11, 12, 70), (5010, 70, 70), (5010, 2)
     # Test (N, C, T, V)=(415, 11, 6, 70), (415, 70, 70), (415, 2)
-    print(np.shape(all_data), np.shape(all_adjacency), np.shape(all_mean_xy), np.shape(all_map_data))
+    print(np.shape(all_data), np.shape(all_adjacency), np.shape(all_mean_xy), np.shape(all_map_data)), np.shape(all_lane_label)
 
     # save training_data and trainjing_adjacency into a file.
     if pra_is_train:
@@ -348,7 +355,7 @@ def generate_data(pra_file_path_list, pra_is_train=True):
         save_path = os.path.join(data_root, test_data_path, config.test_data_file)
         print("saving test data: [%s]"%save_path)
     with open(save_path, 'wb') as writer:
-        pickle.dump([all_data, all_adjacency, all_mean_xy, all_map_data], writer)
+        pickle.dump([all_data, all_adjacency, all_mean_xy, all_map_data, all_lane_label], writer)
 
 
 if __name__ == '__main__':
