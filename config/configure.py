@@ -31,7 +31,7 @@ test_data_path = "prediction_test/"
 # test_data_file = 'test_data_%d_%d_%d.pkl'%(frame_steps, history_frames, future_frames)
 train_data_file = 'train_data_%d_%d_%d_%d.pkl'%(frame_steps, history_frames, future_frames, lane_search_radius)
 test_data_file = 'test_data_%d_%d_%d_%d.pkl'%(frame_steps, history_frames, future_frames, lane_search_radius)
-save_model_prefix = "model_argo_all_near4label_cat_"
+save_model_prefix = "model_argo_all_near4label_"
 
 
 
@@ -45,11 +45,6 @@ lr_decay_epoch = 5
 lr_decay = 0.5
 dropout = 0.5
 
-dev = torch.device("cpu")
-use_cuda = False
-if torch.cuda.is_available():
-    dev = torch.device("cuda")
-    use_cuda = True
 log_file = os.path.join(work_dir,'log_test.txt')
 test_result_file = 'prediction_result.txt'
 
@@ -58,11 +53,11 @@ num_node = max_num_object
 graph_args={'max_hop':max_hop, 'num_node':num_node}
 loss_weight = [1, 1]
 
-train = True
+train = False
 load_model = False
 vel_mode = True
-convert_model = False
-pretrained_model_path = 'trained_models/argo/all/view/model_argo_all_near4label_cat_1101_21:45:46_epoch_0005'
+convert_model = True
+pretrained_model_path = 'trained_models/argo/all/model_argo_all_near4label_1109_19:58:29_epoch_0019.pt'
 view = True 
 save_view = True
 save_view_path = os.path.join(work_dir, "view", pretrained_model_path.split(".")[0].split("/")[-1])
@@ -70,6 +65,11 @@ if not os.path.exists(save_view_path):
     os.makedirs(save_view_path)
     print("save view path: [%s]"%save_view_path)
 
+dev = torch.device("cpu")
+use_cuda = False
+if not convert_model and torch.cuda.is_available():
+    dev = torch.device("cuda")
+    use_cuda = True
 # model param
 in_channels = 4
 spatial_kernel_size = max_hop + 1

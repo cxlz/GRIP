@@ -46,9 +46,9 @@ class Graph_Conv_Block(nn.Module):
         #     )
         self.relu = nn.ReLU(inplace=False)
 
-    def forward(self, x, A=None):
+    def forward(self, x, A=torch.Tensor()):
         res = x
-        if not A is None:
+        if A.shape[0] > 0:
             x, A = self.gcn(x, A)
         x = self.tcn(x)
         x = x + res

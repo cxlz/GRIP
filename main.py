@@ -108,7 +108,7 @@ def visulize(outputs, targets, output_mask, lanes=None, att=None):
                     # a = np.mean(a, axis=0)
                     # a = a.reshape((lane.shape[1], lane.shape[2])) # T', V'
                     # sum_a = np.sum(a, axis=-1)
-                    a = att[idx, i]
+                    a = att[idx]
                     argmax_a = np.argmax(a, axis=-1)
                     for ii in range(lane.shape[-1]):
                         if a[ii] == 0:
@@ -282,7 +282,7 @@ def train_model(pra_model, pra_data_loader, pra_optimizer, pra_epoch_log):
             ########################################################
             # We use abs to compute loss to backward update weights
             # (N, T), (N, T)
-            att = att[:,0]
+            # att = att[:,0]
             # celoss = 0
             # for i in range(att.shape[0]):
             #     a = att[i].clone().view((1, -1))
@@ -342,7 +342,7 @@ def val_model(pra_model, pra_data_loader):
             output_mask = data[:,-1:,now_history_frames:,:] # (N, C, T, V)=(N, 1, 6, 120)
 
             ori_output_loc_GT = no_norm_loc_data[:,:2,now_history_frames:,:]
-            ori_output_last_loc = no_norm_loc_data[:,:2,now_history_frames-1:now_history_frames,:]
+            ori_output_last_loc = no_norm_loc_data[:,:2,now_history_frames-1:now_history_frames,:1]
 
             # for category
             cat_mask = ori_data[:,2:3, now_history_frames:, :] # (N, C, T, V)=(N, 1, 6, 120)
@@ -364,7 +364,7 @@ def val_model(pra_model, pra_data_loader):
             now_map_data = ori_map_data.detach().cpu().numpy()
             now_att = att.detach().cpu().numpy()
             if config.view:
-                visulize(now_pred[:,:,:,0:1], now_ori_data[:, :5, :, 0:1], now_ori_data[:, -1:, -1:, 0:1], now_map_data[:, 3:5], now_att[:,0:1])
+                visulize(now_pred[:,:,:,0:1], now_ori_data[:, :5, :, 0:1], now_ori_data[:, -1:, -1:, 0:1], now_map_data[:, 3:5], now_att)
 
             ### overall dist
             # overall_sum_time, overall_num, x2y2 = compute_RMSE(predicted, output_loc_GT, output_mask)        
@@ -445,7 +445,7 @@ def test_model(pra_model, pra_data_loader):
             # print(data.shape, A.shape, mean_xy.shape, input_data.shape)
 
             ori_output_loc_GT = no_norm_loc_data[:,:2,history_frames:,:]
-            ori_output_last_loc = no_norm_loc_data[:,:2,history_frames-1:history_frames,:]
+            ori_output_last_loc = no_norm_loc_data[:,:2,history_frames-1:history_frames,:1]
         
             A = A.float().to(dev)
             # time1 = time.clock()
@@ -457,7 +457,13 @@ def test_model(pra_model, pra_data_loader):
                 for ind in range(1, predicted.shape[-2]):
                     predicted[:,:,ind] = torch.sum(predicted[:,:,ind-1:ind+1], dim=-2)
                 predicted += ori_output_last_loc
-            celoss = celossfunc(torch.log(att[:,0]), lane_label)
+            # celoss = celossfunc(torch.log(att[:,0]), lane_label)
+
+            now_pred = predicted.detach().cpu().numpy() # (N, C, T, V)=(N, 2, 6, 120)
+            # now_mean_xy = mean_xy.detach().cpu().numpy() # (N, 2)
+            now_ori_data = ori_data.detach().cpu().numpy() # (N, C, T, V)=(N, 11, 6, 120)
+            now_ori_output_loc_GT = ori_output_loc_GT.detach().cpu().numpy()
+            now_output_mask = output_mask.detach().cpu().numpy()
 
             ### overall dist
             # overall_sum_time, overall_num, x2y2 = compute_RMSE(predicted, output_loc_GT, output_mask)        
@@ -469,19 +475,14 @@ def test_model(pra_model, pra_data_loader):
             now_x2y2 = now_x2y2.sum(axis=-1)
             # all_overall_sum_list.extend(now_x2y2)
 
-            now_pred = predicted.detach().cpu().numpy() # (N, C, T, V)=(N, 2, 6, 120)
-            # now_mean_xy = mean_xy.detach().cpu().numpy() # (N, 2)
-            now_ori_data = ori_data.detach().cpu().numpy() # (N, C, T, V)=(N, 11, 6, 120)
-            now_ori_output_loc_GT = ori_output_loc_GT.detach().cpu().numpy()
-            now_output_mask = output_mask.detach().cpu().numpy()
             # now_mask = now_ori_data[:, -1, history_frames - 1, :] # (N, V)
             
-            distance_error = np.sum((np.sum(((now_pred[:,:,:,0:1] - now_ori_output_loc_GT[:,:,:,0:1])*now_output_mask[:,:,:,0:1]) ** 2, axis=1) ** 0.5), axis=-1)
+            distance_error = (np.sum(((now_pred[:,:,:,0] - now_ori_output_loc_GT[:,:,:,0])*now_output_mask[:,:,:,0]) ** 2, axis=1) ** 0.5)
             all_overall_sum_list.extend(distance_error)
 
             now_map_data = ori_map_data.detach().cpu().numpy()
             now_att = att.detach().cpu().numpy()
-            visulize(now_pred[:,:,:,0:1], now_ori_data[:, :5, :, 0:1], now_ori_data[:, -1:, -1:, 0:1], now_map_data[:, 3:5], now_att[:,0:1])
+            visulize(now_pred[:,:,:,0:1], now_ori_data[:, :5, :, 0:1], now_ori_data[:, -1:, -1:, 0:1], now_map_data[:, 3:5], now_att)
 
             # now_pred = np.transpose(now_pred, (0, 2, 3, 1)) # (N, T, V, 2)
             # now_ori_data = np.transpose(now_ori_data, (0, 2, 3, 1)) # (N, T, V, 11)
@@ -547,13 +548,13 @@ def run_trainval(pra_model, pra_traindata_path, pra_testdata_path):
         if overall_loss_time < pre_loss:
             pre_loss = overall_loss_time
             best_epoch = now_epoch
-        # else:
-        #     learning_rate *= lr_decay
-        #     if learning_rate < 1e-10:
-        #         my_print("best epoch: %d, best loss: %f"%(best_epoch, pre_loss))
-        #         break
-        #     for param_group in optimizer.param_groups:
-        #         param_group["lr"] = learning_rate
+        else:
+            learning_rate *= lr_decay
+            if learning_rate < 1e-10:
+                my_print("best epoch: %d, best loss: %f"%(best_epoch, pre_loss))
+                break
+            for param_group in optimizer.param_groups:
+                param_group["lr"] = learning_rate
         my_print("now_train_loss: %f, best epoch: %d, best val loss: %f"%(now_loss, best_epoch, pre_loss))
 
 
@@ -573,7 +574,7 @@ if __name__ == '__main__':
         model.cuda()
     # model.to(dev)
 
-    if config.load_model or config.convert_model or not config.train:
+    if config.load_model or not config.train:
         pretrained_model_path = config.pretrained_model_path
         model = my_load_model(model, pretrained_model_path)
 

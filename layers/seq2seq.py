@@ -61,7 +61,9 @@ class Seq2Seq(nn.Module):
         self.encoder_map = EncoderRNN(input_size, hidden_size, num_layers, isCuda)
         self.attention = Attention(hidden_size*30)
 
-    def forward(self, in_data, last_location, map_data, pred_length:int=6, map_mask=None): #, teacher_forcing_ratio:int=0, teacher_location=torch.zeros(1)
+    def forward(self, in_data, last_location, map_data, pred_length:int=6, map_mask=torch.Tensor()): #, teacher_forcing_ratio:int=0, teacher_location=torch.zeros(1)
+        
+        
         batch_size = in_data.shape[0]
         out_dim = self.decoder.output_size
         self.pred_length = pred_length
@@ -72,12 +74,12 @@ class Seq2Seq(nn.Module):
             outputs = outputs.cuda()    
             # hidden = hidden.cuda()
             #    
-        encoded_output, hidden = self.encoder(in_data)
+        encoded_output, hidden = self.encoder(in_data) #in_data (N, T, C) --> hidden (L, N, H)
 
-        map_encoded_output, map_hidden = self.encoder(map_data)
+        map_encoded_output, map_hidden = self.encoder(map_data) #map_data (NmV, mT, C) --> map_hidden (L, NmV, H)
         
 
-        map_hidden, att = self.attention(hidden, map_hidden, map_mask)
+        map_hidden, att = self.attention(hidden, map_hidden, map_mask) #map_hidden (L, N, H) , att (N, mV)
 
 
         # N, V, mV = att.shape
@@ -101,7 +103,7 @@ class Seq2Seq(nn.Module):
             decoder_input = now_out
 
         # att = None
-        return outputs, att
+        return outputs.permute(0,2,1).unsqueeze(-1), att
 
 ####################################################
 ####################################################
