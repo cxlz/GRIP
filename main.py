@@ -118,7 +118,7 @@ def visulize(outputs, targets, output_mask, lanes=None, att=None):
                         for jj in range(segment.shape[-1] - 1):
                             color = (0,0,0) 
                             thickness = 1
-                            if abs(a[ii] - a[argmax_a]) < 1e-6:
+                            if config.use_map and abs(a[ii] - a[argmax_a]) < 1e-6:
                                 color = (0,255,0)
                                 thickness = 2   
                             p1 = segment[:,jj]
@@ -162,11 +162,11 @@ def visulize(outputs, targets, output_mask, lanes=None, att=None):
 
 
                 obs_info = "obs[{:0>5d}]_frame[{:0>5d}]_type[{:d}]_[{:0>4d}].jpg".format(*(tars[(1,0,2),history_frame_num,i].astype("int")), count)
-                img = cv2.putText(img, "range[{:.3f}]".format(abs(scale_val * 512)), (360,20), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0,0,0), thickness=1)
                 img = cv2.putText(img, obs_info, (10,20), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0,0,0), thickness=1)
                 img = cv2.putText(img, "speed[{:.3f}]".format(last_speed),    (10, 40), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0,0,0), thickness=1)
                 img = cv2.putText(img, "FDE  [{:.3f}]".format(x2y2[-1]),      (10, 60), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0,0,0), thickness=1)
                 img = cv2.putText(img, "ADE  [{:.3f}]".format(np.mean(x2y2)), (10, 80), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0,0,0), thickness=1)
+                img = cv2.putText(img, "range[{:.3f}]".format(abs(scale_val * 512)), (360,480), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0,0,0), thickness=1)
                 cv2.imshow("img_grip", img)
                 cv2.waitKey(1)
                 if not config.train and config.save_view:
@@ -198,12 +198,14 @@ def my_load_model(pra_model, pra_path):
 
 def data_loader(pra_path, pra_batch_size=128, pra_shuffle=False, pra_drop_last=False, train_val_test='train'):
     feeder = Feeder(data_path=pra_path, graph_args=graph_args, train_val_test=train_val_test)
+    # feeder = new_Feeder(pra_path, graph_args=graph_args, train_val_test=train_val_test)
     loader = torch.utils.data.DataLoader(
         dataset=feeder,
         batch_size=pra_batch_size,
         shuffle=pra_shuffle,
         drop_last=pra_drop_last, 
         num_workers=0,
+        # collate_fn=my_collate_fn,
         )
     return loader
     
@@ -263,8 +265,8 @@ def train_model(pra_model, pra_data_loader, pra_optimizer, pra_epoch_log):
         data, no_norm_loc_data, object_type = preprocess_data(ori_data, rescale_xy)
         map_data, _, _, = preprocess_data(ori_map_data, rescale_xy)
         lane_label = torch.argmax(lane_label, dim=1).long().to(dev)
-        # for now_history_frames in range(history_frames, history_frames + 1):
-        for now_history_frames in range(1, data.shape[-2]):
+        for now_history_frames in range(history_frames, history_frames + 1):
+        # for now_history_frames in range(1, data.shape[-2]):
             input_data = data[:,:,:now_history_frames,:] # (N, C, T, V)=(N, 4, 6, 120)
             output_loc_GT = data[:,:2,now_history_frames:,:] # (N, C, T, V)=(N, 2, 6, 120)
             output_mask = data[:,-1:,now_history_frames:,:] # (N, C, T, V)=(N, 1, 6, 120)
@@ -292,11 +294,14 @@ def train_model(pra_model, pra_data_loader, pra_optimizer, pra_epoch_log):
             # log_att = torch.zeros_like(att).to(dev).float()
             # idx = att > 0
             # log_att[idx] = torch.log(att[idx])
-            celoss = celossfunc(att, lane_label)
             overall_sum_time, overall_num, _ = compute_RMSE(predicted[:,:,:,0:1], output_loc_GT[:,:,:,0:1], output_mask[:,:,:,0:1], pra_error_order=2)
             # overall_loss
             total_loss = torch.sum(overall_sum_time) / torch.max(torch.sum(overall_num), torch.ones(1,).to(dev)) #(1,)
-            total_loss = config.loss_weight[0] * total_loss + config.loss_weight[1] * celoss
+            if config.use_map and config.use_celoss:
+                celoss = celossfunc(att, lane_label)
+                total_loss = config.loss_weight[0] * total_loss + config.loss_weight[1] * celoss
+            else:
+                total_loss = config.loss_weight[0] * total_loss
             loss_meter.add(total_loss.item())
             now_lr = [param_group['lr'] for param_group in pra_optimizer.param_groups][0]
             
@@ -482,7 +487,7 @@ def test_model(pra_model, pra_data_loader):
 
             now_map_data = ori_map_data.detach().cpu().numpy()
             now_att = att.detach().cpu().numpy()
-            visulize(now_pred[:,:,:,0:1], now_ori_data[:, :5, :, 0:1], now_ori_data[:, -1:, -1:, 0:1], now_map_data[:, 3:5], now_att)
+            # visulize(now_pred[:,:,:,0:1], now_ori_data[:, :5, :, 0:1], now_ori_data[:, -1:, -1:, 0:1], now_map_data[:, 3:5], now_att)
 
             # now_pred = np.transpose(now_pred, (0, 2, 3, 1)) # (N, T, V, 2)
             # now_ori_data = np.transpose(now_ori_data, (0, 2, 3, 1)) # (N, T, V, 11)
@@ -506,47 +511,53 @@ def test_model(pra_model, pra_data_loader):
             #             writer.write(result)
     all_overall_sum_list = np.array(all_overall_sum_list)
     all_overall_num_list = np.array(all_overall_num_list)
-    display_result(
+    all_over_loss = display_result(
         [all_overall_sum_list, all_overall_num_list], 
         pra_pref='{}_{}'.format('Test', test_data_file), 
         pra_error_order=1
         )
+    return all_over_loss
     # return all_overall_sum_list, all_overall_num_list
 
 
 def run_trainval(pra_model, pra_traindata_path, pra_testdata_path):
     my_print("train_data_file: [%s]"%pra_traindata_path)
     my_print("test_data_file: [%s]"%pra_testdata_path)
-    loader_train = data_loader(pra_traindata_path, pra_batch_size=batch_size_train, pra_shuffle=True, pra_drop_last=True, train_val_test='train')
-    # loader_test = data_loader(pra_testdata_path, pra_batch_size=batch_size_train, pra_shuffle=True, pra_drop_last=True, train_val_test='all')
-
-    # evaluate on testing data (observe 5 frame and predict 1 frame)
-    loader_val = data_loader(pra_traindata_path, pra_batch_size=batch_size_val, pra_shuffle=False, pra_drop_last=False, train_val_test='val') 
     learning_rate = base_lr
     optimizer = optim.Adam(
         [{'params':model.parameters()},],) # lr = 0.0001)
     pre_loss = float("inf")
     best_epoch = 0
+    train_data_files = sorted([os.path.join(pra_traindata_path, f) for f in os.listdir(pra_traindata_path) if f.split(".")[-1] == "pkl"])
     for now_epoch in range(total_epoch):
+        total_train_loss = 0
+        total_val_loss = 0
         # all_loader_train = itertools.chain(loader_train, loader_test)
-        
-        my_print('#######################################Train')
-        now_loss = train_model(pra_model, loader_train, pra_optimizer=optimizer, pra_epoch_log='Epoch:{:>4}/{:>4}'.format(now_epoch, total_epoch))
-        # now_loss = train_model(pra_model, all_loader_train, pra_optimizer=optimizer, pra_epoch_log='Epoch:{:>4}/{:>4}'.format(now_epoch, total_epoch))
-        
-        my_save_model(pra_model, now_epoch)
-        if now_epoch % 5 == 0:
-            config.view = True
-        else:
-            config.view = False
-        my_print('#######################################Test')
-        overall_loss_time = display_result(
-            val_model(pra_model, loader_val), 
-            pra_pref='{}_Epoch{}'.format('Test', now_epoch)
-            )
-        overall_loss_time = np.mean(overall_loss_time)
-        if overall_loss_time < pre_loss:
-            pre_loss = overall_loss_time
+        for idx, train_data_file in enumerate(train_data_files):
+            # train_data_file = os.path.join(data_root, train_data_path, train_data_file)
+            loader_train = data_loader(train_data_file, pra_batch_size=batch_size_train, pra_shuffle=True, pra_drop_last=True, train_val_test='train')
+            # loader_test = data_loader(pra_testdata_path, pra_batch_size=batch_size_train, pra_shuffle=True, pra_drop_last=True, train_val_test='all')
+
+            # evaluate on testing data (observe 5 frame and predict 1 frame)
+            loader_val = data_loader(train_data_file, pra_batch_size=batch_size_val, pra_shuffle=False, pra_drop_last=False, train_val_test='val') 
+            my_print('#######################################Train_%d'%idx)
+            now_loss = train_model(pra_model, loader_train, pra_optimizer=optimizer, pra_epoch_log='Epoch:{:>4}/{:>4}'.format(now_epoch, total_epoch))
+            # now_loss = train_model(pra_model, all_loader_train, pra_optimizer=optimizer, pra_epoch_log='Epoch:{:>4}/{:>4}'.format(now_epoch, total_epoch))
+            total_train_loss += now_loss
+            if now_epoch % 5 == 0:
+                config.view = True
+            else:
+                config.view = False
+            my_print('#######################################Test_%d'%idx)
+            overall_loss_time = display_result(
+                val_model(pra_model, loader_val), 
+                pra_pref='{}_Epoch{}'.format('Test', now_epoch)
+                )
+            total_val_loss += np.mean(overall_loss_time)
+        total_train_loss /= len(train_data_files)
+        total_val_loss /= len(train_data_files)
+        if total_val_loss < pre_loss:
+            pre_loss = total_val_loss
             best_epoch = now_epoch
         else:
             learning_rate *= lr_decay
@@ -555,15 +566,28 @@ def run_trainval(pra_model, pra_traindata_path, pra_testdata_path):
                 break
             for param_group in optimizer.param_groups:
                 param_group["lr"] = learning_rate
-        my_print("now_train_loss: %f, best epoch: %d, best val loss: %f"%(now_loss, best_epoch, pre_loss))
+        my_print("now_train_loss: %f, best epoch: %d, best val loss: %f"%(total_train_loss, best_epoch, pre_loss))
+        my_save_model(pra_model, now_epoch)
 
 
 def run_test(pra_model, pra_data_path):
     my_print("test_data_file: [%s]"%pra_data_path)
-    loader_test = data_loader(pra_data_path, pra_batch_size=batch_size_test, pra_shuffle=False, pra_drop_last=False, train_val_test='test')
     pra_model.eval()
-    my_print('#######################################Test')
-    test_model(pra_model, loader_test)
+    test_data_files = sorted([os.path.join(pra_data_path, f) for f in os.listdir(pra_data_path) if f.split(".")[-1] == "pkl"])
+    total_test_loss = 0
+    for idx, test_data_file in enumerate(test_data_files):
+        my_print('#######################################Test_%d'%idx)
+        loader_test = data_loader(test_data_file, pra_batch_size=batch_size_test, pra_shuffle=False, pra_drop_last=False, train_val_test='test')
+        # overall_loss_time = display_result(
+        #     test_model(pra_model, loader_test), 
+        #     pra_pref='{}_Epoch{}'.format('Test', now_epoch)
+        #     )
+        overall_loss_time = test_model(pra_model, loader_test)
+        total_test_loss += overall_loss_time
+    total_test_loss /= (len(test_data_files))
+    pra_pref='{}_{}'.format('Test', "overall")
+    overall_log = '|{}|[{}] All_All: {}'.format(datetime.now(), pra_pref, ' '.join(['{:.3f}'.format(x) for x in list(total_test_loss) + [np.mean(total_test_loss)]]))
+    my_print(overall_log)
 
 
 
@@ -590,20 +614,24 @@ if __name__ == '__main__':
         os._exit(0)
 
     data_root = config.data_root
-    train_data_path = config.train_data_path
-    test_data_path = config.test_data_path
-    train_data_file = config.train_data_file
-    test_data_file = config.test_data_file
-    train_data_file = os.path.join(data_root, train_data_path, train_data_file)
-    test_data_file = os.path.join(data_root, test_data_path, test_data_file)
+    # train_data_file = os.path.join(data_root, train_data_path)
+    # test_data_file = os.path.join(data_root, test_data_path)
     # print("train_data_file: [%s]"%train_data_file)
     # print("test_data_file: [%s]"%test_data_file)
 
+    test_data_path = config.test_data_path
+    test_data_file = config.test_data_file
+    # test_data_file = os.path.join(data_root, test_data_path, test_data_file)
     # train and evaluate model
     if config.train:
-        run_trainval(model, pra_traindata_path=train_data_file, pra_testdata_path=test_data_file)
+        train_data_path = os.path.join(data_root, config.train_data_path)
+        # train_data_files = sorted([os.path.join(train_data_path, f) for f in os.listdir(train_data_path) if f.split(".")[-1] == "pkl"])
+        # for train_data_file in train_data_files[:1]:
+            # train_data_file = os.path.join(data_root, train_data_path, train_data_file)
+        run_trainval(model, pra_traindata_path=train_data_path, pra_testdata_path=test_data_file)
     else:
-        run_test(model, test_data_file)
+        test_data_path = os.path.join(data_root, config.test_data_path)
+        run_test(model, test_data_path)
     
         
         

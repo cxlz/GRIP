@@ -76,10 +76,6 @@ class Seq2Seq(nn.Module):
             #    
         encoded_output, hidden = self.encoder(in_data) #in_data (N, T, C) --> hidden (L, N, H)
 
-        map_encoded_output, map_hidden = self.encoder(map_data) #map_data (NmV, mT, C) --> map_hidden (L, NmV, H)
-        
-
-        map_hidden, att = self.attention(hidden, map_hidden, map_mask) #map_hidden (L, N, H) , att (N, mV)
 
 
         # N, V, mV = att.shape
@@ -89,9 +85,12 @@ class Seq2Seq(nn.Module):
         #     imv = i * mV
         #     for j in range(V):
         #         hidden[:, iv + j] = hidden[:, iv + j] + map_hidden[:, imv + argmax_att[i, j]]
-        hidden = hidden + map_hidden
-        # hidden = torch.cat((hidden, map_hidden), dim=-1)
-        hidden = torch.tanh(hidden)
+        if config.use_map:
+            map_encoded_output, map_hidden = self.encoder(map_data) #map_data (NmV, mT, C) --> map_hidden (L, NmV, H)
+            map_hidden, att = self.attention(hidden, map_hidden, map_mask) #map_hidden (L, N, H) , att (N, mV)
+            hidden = hidden + map_hidden
+            # hidden = torch.cat((hidden, map_hidden), dim=-1)
+            hidden = torch.tanh(hidden)
         decoder_input = last_location
         for t in range(self.pred_length):
             # encoded_input = torch.cat((now_label, encoded_input), dim=-1) # merge class label into input feature
