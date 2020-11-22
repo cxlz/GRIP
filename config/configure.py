@@ -31,7 +31,7 @@ test_data_path = "prediction_test/"
 # test_data_file = 'test_data_%d_%d_%d.pkl'%(frame_steps, history_frames, future_frames)
 train_data_file = 'train_data_%d_%d_%d_%d.pkl'%(frame_steps, history_frames, future_frames, lane_search_radius)
 test_data_file = 'test_data_%d_%d_%d_%d.pkl'%(frame_steps, history_frames, future_frames, lane_search_radius)
-save_model_prefix = "model_argo_all_"
+save_model_prefix = "model_argo_all_pos_"
 
 
 
@@ -59,7 +59,7 @@ vel_mode = True
 use_map = True
 use_celoss = True
 convert_model = False
-pretrained_model_path = 'trained_models/argo/all/model_argo_all_1119_22:53:21_epoch_0024.pt'
+pretrained_model_path = 'trained_models/argo/all/model_argo_all_1122_17:35:50_epoch_0009.pt'
 view = True 
 save_view = False
 save_view_path = os.path.join(work_dir, "view", pretrained_model_path.split(".")[0].split("/")[-1])

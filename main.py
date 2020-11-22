@@ -209,10 +209,10 @@ def data_loader(pra_path, pra_batch_size=128, pra_shuffle=False, pra_drop_last=F
         )
     return loader
     
-def preprocess_data(pra_data, pra_rescale_xy):
+def preprocess_data(pra_data, pra_rescale_xy, feature_id=[3, 4, -2, -1]):
     # pra_data: (N, C, T, V)
     # C = 11: [frame_id, object_id, object_type, position_x, position_y, position_z, object_length, pbject_width, pbject_height, heading] + [mask]    
-    feature_id = [3, 4, -2, -1]
+    
     ori_data = pra_data[:,feature_id].detach()
     data = ori_data.detach().clone()
 
@@ -256,29 +256,34 @@ def train_model(pra_model, pra_data_loader, pra_optimizer, pra_epoch_log):
 
     loss_meter.reset()
     torch.autograd.set_detect_anomaly(True)
-    for iteration, (ori_data, A, _, ori_map_data, lane_label) in enumerate(pra_data_loader):
+    for iteration, (ori_data, A, _, ori_map_data, lane_label, ori_trajectory) in enumerate(pra_data_loader):
         # print(iteration, ori_data.shape, A.shape)
         # ori_data: (N, C, T, V)
         # C = 11: [frame_id, object_id, object_type, position_x, position_y, position_z, object_length, pbject_width, pbject_height, heading] + [mask]
         # max_xy = torch.max(torch.max(torch.max(torch.abs(ori_data[:,3:5]), dim=2)[0], dim=-1)[0], dim=0)[0]
         # rescale_xy[:,:,0,0] = max_xy
+        ori_trajectory = ori_trajectory.permute(0,3,2,1)
         data, no_norm_loc_data, object_type = preprocess_data(ori_data, rescale_xy)
         map_data, _, _, = preprocess_data(ori_map_data, rescale_xy)
+        trajectory, _, _, = preprocess_data(ori_trajectory, rescale_xy, [1,2,3,4])
         lane_label = torch.argmax(lane_label, dim=1).long().to(dev)
         for now_history_frames in range(history_frames, history_frames + 1):
-        # for now_history_frames in range(1, data.shape[-2]):
+            # for now_history_frames in range(1, data.shape[-2]):
             input_data = data[:,:,:now_history_frames,:] # (N, C, T, V)=(N, 4, 6, 120)
             output_loc_GT = data[:,:2,now_history_frames:,:] # (N, C, T, V)=(N, 2, 6, 120)
             output_mask = data[:,-1:,now_history_frames:,:] # (N, C, T, V)=(N, 1, 6, 120)
+            output_trajectory_GT = trajectory[:,:2,now_history_frames:,:] # (N, C, T, V)=(N, 2, 6, 120)
+            output_mask = trajectory[:,-1:,now_history_frames:,:] # (N, C, T, V)=(N, 1, 6, 120)
             
             A = A.float().to(dev)
             # t1 = time.time()
             # print("load data time: %f"%(t1 - t3))
-            predicted, att = pra_model(pra_x=input_data, pra_map=map_data, pra_A=A, pra_pred_length=output_loc_GT.shape[-2]) #, pra_teacher_forcing_ratio=0, pra_teacher_location=output_loc_GT (N, C, T, V)=(N, 2, 6, 120)
+            predicted, att = pra_model(pra_x=input_data, pra_map=trajectory, pra_A=A, pra_pred_length=output_trajectory_GT.shape[-2]) #, pra_teacher_forcing_ratio=0, pra_teacher_location=output_loc_GT (N, C, T, V)=(N, 2, 6, 120)
             # t2 = time.time()
             # print("pred time: %f"%(t2-t1))
             predicted = predicted * rescale_xy
             output_loc_GT = output_loc_GT * rescale_xy
+            output_trajectory_GT = output_trajectory_GT * rescale_xy
             ########################################################
             # Compute loss for training
             ########################################################
@@ -294,7 +299,7 @@ def train_model(pra_model, pra_data_loader, pra_optimizer, pra_epoch_log):
             # log_att = torch.zeros_like(att).to(dev).float()
             # idx = att > 0
             # log_att[idx] = torch.log(att[idx])
-            overall_sum_time, overall_num, _ = compute_RMSE(predicted[:,:,:,0:1], output_loc_GT[:,:,:,0:1], output_mask[:,:,:,0:1], pra_error_order=2)
+            overall_sum_time, overall_num, _ = compute_RMSE(predicted[:,:,:,0:1], output_trajectory_GT[:,:,:,0:1], output_mask[:,:,:,0:1], pra_error_order=2)
             # overall_loss
             total_loss = torch.sum(overall_sum_time) / torch.max(torch.sum(overall_num), torch.ones(1,).to(dev)) #(1,)
             if config.use_map and config.use_celoss:
@@ -333,27 +338,33 @@ def val_model(pra_model, pra_data_loader):
     all_bike_num_list = []
     celossfunc = torch.nn.NLLLoss()
     # train model using training data
-    for iteration, (ori_data, A, _, ori_map_data, lane_label) in enumerate(pra_data_loader):
+    for iteration, (ori_data, A, _, ori_map_data, lane_label, ori_trajectory) in enumerate(pra_data_loader):
         # data: (N, C, T, V)
         # C = 11: [frame_id, object_id, object_type, position_x, position_y, position_z, object_length, pbject_width, pbject_height, heading] + [mask]
         # max_xy = torch.max(torch.max(torch.max(torch.abs(ori_data[:,3:5]), dim=2)[0], dim=-1)[0], dim=0)[0]
         # rescale_xy[:,:,0,0] = max_xy
+        ori_trajectory = ori_trajectory.permute(0,3,2,1)
         data, no_norm_loc_data, _ = preprocess_data(ori_data, rescale_xy)
         map_data, _, _, = preprocess_data(ori_map_data, rescale_xy)
+        trajectory, no_norm_trajectory, _, = preprocess_data(ori_trajectory, rescale_xy, [1,2,3,4])
         lane_label = torch.argmax(lane_label, dim=1).long().to(dev)
         for now_history_frames in range(history_frames, history_frames + 1):
             input_data = data[:,:,:now_history_frames,:] # (N, C, T, V)=(N, 4, 6, 120)
             output_loc_GT = data[:,:2,now_history_frames:,:] # (N, C, T, V)=(N, 2, 6, 120)
             output_mask = data[:,-1:,now_history_frames:,:] # (N, C, T, V)=(N, 1, 6, 120)
+            output_trajectory_GT = trajectory[:,:2,now_history_frames:,:] # (N, C, T, V)=(N, 2, 6, 120)
+            output_mask = trajectory[:,-1:,now_history_frames:,:] # (N, C, T, V)=(N, 1, 6, 120)
 
             ori_output_loc_GT = no_norm_loc_data[:,:2,now_history_frames:,:]
             ori_output_last_loc = no_norm_loc_data[:,:2,now_history_frames-1:now_history_frames,:1]
+            ori_output_trajectory_GT = no_norm_trajectory[:,:2,now_history_frames:,:]
+            ori_output_last_trajectory = no_norm_trajectory[:,:2,now_history_frames-1:now_history_frames,:1]
 
             # for category
             cat_mask = ori_data[:,2:3, now_history_frames:, :] # (N, C, T, V)=(N, 1, 6, 120)
             
             A = A.float().to(dev)
-            predicted, att = pra_model(pra_x=input_data, pra_map=map_data, pra_A=A, pra_pred_length=output_loc_GT.shape[-2]) #, pra_teacher_forcing_ratio=0, pra_teacher_location=output_loc_GT (N, C, T, V)=(N, 2, 6, 120)
+            predicted, att = pra_model(pra_x=input_data, pra_map=trajectory, pra_A=A, pra_pred_length=output_trajectory_GT.shape[-2]) #, pra_teacher_forcing_ratio=0, pra_teacher_location=output_loc_GT (N, C, T, V)=(N, 2, 6, 120)
             ########################################################
             # Compute details for training
             ########################################################
@@ -362,18 +373,18 @@ def val_model(pra_model, pra_data_loader):
             if config.vel_mode:
                 for ind in range(1, predicted.shape[-2]):
                     predicted[:,:,ind] = torch.sum(predicted[:,:,ind-1:ind+1], dim=-2)
-                predicted += ori_output_last_loc
+                predicted += ori_output_last_trajectory
 
             now_pred = predicted.detach().cpu().numpy() # (N, C, T, V)=(N, 2, 6, 120)
             now_ori_data = ori_data.detach().cpu().numpy() # (N, C, T, V)=(N, 11, 6, 120)
             now_map_data = ori_map_data.detach().cpu().numpy()
             now_att = att.detach().cpu().numpy()
-            if config.view:
-                visulize(now_pred[:,:,:,0:1], now_ori_data[:, :5, :, 0:1], now_ori_data[:, -1:, -1:, 0:1], now_map_data[:, 3:5], now_att)
+            # if config.view:
+            #     visulize(now_pred[:,:,:,0:1], now_ori_data[:, :5, :, 0:1], now_ori_data[:, -1:, -1:, 0:1], now_map_data[:, 3:5], now_att)
 
             ### overall dist
             # overall_sum_time, overall_num, x2y2 = compute_RMSE(predicted, output_loc_GT, output_mask)        
-            overall_sum_time, overall_num, x2y2 = compute_RMSE(predicted[:,:,:,0:1], ori_output_loc_GT[:,:,:,0:1], output_mask[:,:,:,0:1])       
+            overall_sum_time, overall_num, x2y2 = compute_RMSE(predicted[:,:,:,0:1], ori_output_trajectory_GT[:,:,:,0:1], output_mask[:,:,:,0:1])       
             # all_overall_sum_list.extend(overall_sum_time.detach().cpu().numpy())
             all_overall_num_list.extend(overall_num.detach().cpu().numpy())
             # x2y2 (N, 6, 39)
@@ -529,6 +540,7 @@ def run_trainval(pra_model, pra_traindata_path, pra_testdata_path):
     pre_loss = float("inf")
     best_epoch = 0
     train_data_files = sorted([os.path.join(pra_traindata_path, f) for f in os.listdir(pra_traindata_path) if f.split(".")[-1] == "pkl"])
+    train_data_files = train_data_files[:1]
     for now_epoch in range(total_epoch):
         total_train_loss = 0
         total_val_loss = 0
@@ -575,6 +587,7 @@ def run_test(pra_model, pra_data_path):
     pra_model.eval()
     test_data_files = sorted([os.path.join(pra_data_path, f) for f in os.listdir(pra_data_path) if f.split(".")[-1] == "pkl"])
     total_test_loss = 0
+    test_data_files = test_data_files[:1]
     for idx, test_data_file in enumerate(test_data_files):
         my_print('#######################################Test_%d'%idx)
         loader_test = data_loader(test_data_file, pra_batch_size=batch_size_test, pra_shuffle=False, pra_drop_last=False, train_val_test='test')
@@ -621,16 +634,16 @@ if __name__ == '__main__':
 
     test_data_path = config.test_data_path
     test_data_file = config.test_data_file
+    train_data_path = os.path.join(data_root, config.train_data_path)
+    test_data_path = os.path.join(data_root, config.test_data_path)
     # test_data_file = os.path.join(data_root, test_data_path, test_data_file)
     # train and evaluate model
     if config.train:
-        train_data_path = os.path.join(data_root, config.train_data_path)
         # train_data_files = sorted([os.path.join(train_data_path, f) for f in os.listdir(train_data_path) if f.split(".")[-1] == "pkl"])
         # for train_data_file in train_data_files[:1]:
             # train_data_file = os.path.join(data_root, train_data_path, train_data_file)
         run_trainval(model, pra_traindata_path=train_data_path, pra_testdata_path=test_data_file)
     else:
-        test_data_path = os.path.join(data_root, config.test_data_path)
         run_test(model, test_data_path)
     
         

@@ -66,8 +66,8 @@ class Attention(nn.Module):
 
         ans = ans.view(mN, -1, mV, mT).contiguous()
 
-        dk = torch.diag(1/torch.sum(mask.float(), dim=1))
-        ans = torch.einsum('nlvt,nm->mlvt', (ans, dk))
+        # dk = torch.diag(1/(torch.sum(mask.float(), dim=1)))
+        # ans = torch.einsum('nlvt,nm->mlvt', (ans, dk))
 
         mask = mask.unsqueeze(1)
         mask = mask.unsqueeze(-1)
