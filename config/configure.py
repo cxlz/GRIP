@@ -21,10 +21,10 @@ map_type = "argo"
 
 
 # data_root = 'data/our_data/0908'
-data_root = '/datastore/data/cxl/GRIP/data/argo/all_data'
+data_root = '/datastore/data/cxl/GRIP/data/argo/all'
 # data_root = '/datastore/data/cxl/GRIP/data/argo/no_slow_obj_grip'
 # data_root = "data/xincoder/ApolloScape"
-work_dir = 'trained_models/argo/all_data'
+work_dir = 'trained_models/argo/all'
 train_data_path = "prediction_train/"
 test_data_path = "prediction_test/"
 # train_data_file = 'train_data_%d_%d_%d.pkl'%(frame_steps, history_frames, future_frames)
