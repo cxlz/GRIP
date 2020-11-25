@@ -370,6 +370,7 @@ def generate_train_data(pra_file_path):
             V is the maximum number of objects. zero-padding for less objects. 
     '''
     now_dict, city = get_frame_instance_dict(pra_file_path)
+    seq_id = int(pra_file_path.split("/")[-1].split(".")[-2].split("_")[-1])
     frame_id_set = sorted(set(now_dict.keys()))
     # print(pra_file_path)
     all_feature_list = []
@@ -411,13 +412,13 @@ def generate_train_data(pra_file_path):
         all_map_list = np.transpose(all_map_list, (0, 3, 2, 1))
         all_trajectory_list = np.transpose(all_trajectory_list, (0, 3, 2, 1))
     # print(all_feature_list.shape, all_adjacency_list.shape)
-    return all_feature_list, all_adjacency_list, all_mean_list, all_map_list, all_lane_list, all_trajectory_list
+    return all_feature_list, all_adjacency_list, all_mean_list, all_map_list, all_lane_list, all_trajectory_list, seq_id
 
 
 def generate_test_data(pra_file_path):
     now_dict, city = get_frame_instance_dict(pra_file_path)
     frame_id_set = sorted(set(now_dict.keys()))
-    
+    seq_id = int(pra_file_path.split("/")[-1].split(".")[-2].split("_")[-1])
     all_feature_list = []
     all_adjacency_list = []
     all_mean_list = []
@@ -460,13 +461,14 @@ def generate_data(pra_file_path_list, pra_is_train=True, save_data=True, idx=-1)
     all_map_data = []
     all_lane_label = []
     all_trajetory = []
+    all_seq_id = []
     # for file_path in pra_file_path_list:
     for file_path in tqdm(pra_file_path_list):
         # print(file_path)
         if pra_is_train:
-            now_data, now_adjacency, now_mean_xy, now_map_data, now_lane_label, now_trajectory = generate_train_data(file_path)
+            now_data, now_adjacency, now_mean_xy, now_map_data, now_lane_label, now_trajectory, seq_id = generate_train_data(file_path)
         else:
-            now_data, now_adjacency, now_mean_xy, now_map_data, now_lane_label, now_trajectory = generate_train_data(file_path)
+            now_data, now_adjacency, now_mean_xy, now_map_data, now_lane_label, now_trajectory, seq_id = generate_train_data(file_path)
         if now_trajectory.shape[0] > 0:
             all_data.extend(now_data)
             all_adjacency.extend(now_adjacency)
@@ -474,6 +476,7 @@ def generate_data(pra_file_path_list, pra_is_train=True, save_data=True, idx=-1)
             all_map_data.extend(now_map_data)
             all_lane_label.extend(now_lane_label)
             all_trajetory.extend(now_trajectory)
+            all_seq_id.append(seq_id)
 
     all_data = np.array(all_data) #(N, C, T, V)=(5010, 11, 12, 70) Train
     all_adjacency = np.array(all_adjacency) #(5010, 70, 70) Train
@@ -481,6 +484,7 @@ def generate_data(pra_file_path_list, pra_is_train=True, save_data=True, idx=-1)
     all_map_data = np.array(all_map_data)
     all_lane_label = np.array(all_lane_label)
     all_trajetory = np.array(all_trajetory)
+    all_seq_id = np.array(all_seq_id, dtype="int")
 
     # Train (N, C, T, V)=(5010, 11, 12, 70), (5010, 70, 70), (5010, 2)
     # Test (N, C, T, V)=(415, 11, 6, 70), (415, 70, 70), (415, 2)
@@ -502,7 +506,7 @@ def generate_data(pra_file_path_list, pra_is_train=True, save_data=True, idx=-1)
             print("saving test data: [%s]"%save_path)
 
         with open(save_path, 'wb') as writer:
-            pickle.dump([all_data, all_adjacency, all_mean_xy, all_map_data, all_lane_label, all_trajetory], writer)
+            pickle.dump([all_data, all_adjacency, all_mean_xy, all_map_data, all_lane_label, all_trajetory, all_seq_id], writer)
 
     return all_data, all_adjacency, all_mean_xy, all_map_data, all_lane_label, all_trajetory
 
@@ -513,14 +517,14 @@ if __name__ == '__main__':
     # train_data_path = "prediction_train/"
     train_data_path_list = sorted(glob.glob(os.path.join(data_root, train_data_path + "/raw_data", '*.txt')), key=lambda x: int(x.split(".")[-2].split("_")[-1]))
     test_data_path_list  = sorted(glob.glob(os.path.join(data_root, test_data_path + "/raw_data",  '*.txt')), key=lambda x: int(x.split(".")[-2].split("_")[-1]))
-    train_data_length = len(train_data_path_list) // 9000
+    train_data_length = len(train_data_path_list) // 5000
     for idx in range(train_data_length):#
-        print('Generating Training Data_%02d/%02d'%(idx, train_data_length))
-        generate_data(train_data_path_list[9000*idx:9000*(idx+1)], pra_is_train=True, idx=idx)
-    test_data_length = len(test_data_path_list) // 1000 
+        print('Generating Training Data_%02d/%02d'%(idx+1, train_data_length))
+        generate_data(train_data_path_list[5000*idx:5000*(idx+1)], pra_is_train=True, idx=idx)
+    test_data_length = len(test_data_path_list) // 2000 
     for idx in range(test_data_length):#
-        print('Generating Testing Data_%02d/%02d'%(idx, test_data_length))
-        generate_data(test_data_path_list[1000*idx:1000*(idx+1)], pra_is_train=False, idx=idx)
+        print('Generating Testing Data_%02d/%02d'%(idx+1, test_data_length))
+        generate_data(test_data_path_list[2000*idx:2000*(idx+1)], pra_is_train=False, idx=idx)
     
 
 

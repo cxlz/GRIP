@@ -4,11 +4,11 @@ import os
 # data process
 total_feature_dimension = 10 + 1
 data_time_resolution = 0.1
-frame_steps = 2
-history_frames = 10 # 3 second * 2 frame/second
-future_frames = 15 # 3 second * 2 frame/second
+frame_steps = 1
+history_frames = 20 # 3 second * 2 frame/second
+future_frames = 30 # 3 second * 2 frame/second
 # xy_range = 120 # max_x_range=121, max_y_range=118
-max_num_object = 150 # maximum number of observed objects is 70
+max_num_object = 1 # maximum number of observed objects is 70
 max_num_map = 30 # nearby_lanes 32
 neighbor_distance = 10 # meter
 
@@ -21,10 +21,10 @@ map_type = "argo"
 
 
 # data_root = 'data/our_data/0908'
-data_root = '/datastore/data/cxl/GRIP/data/argo/all'
+data_root = '/datastore/data/cxl/GRIP/data/argo/all_data'
 # data_root = '/datastore/data/cxl/GRIP/data/argo/no_slow_obj_grip'
 # data_root = "data/xincoder/ApolloScape"
-work_dir = 'trained_models/argo/all'
+work_dir = 'trained_models/argo/all_data'
 train_data_path = "prediction_train/"
 test_data_path = "prediction_test/"
 # train_data_file = 'train_data_%d_%d_%d.pkl'%(frame_steps, history_frames, future_frames)
