@@ -21,16 +21,18 @@ map_type = "argo"
 
 
 # data_root = 'data/our_data/0908'
-data_root = '/datastore/data/cxl/GRIP/data/argo/all_data'
+data_root = '/datastore/data/cxl/new_model/data/argo/all_data'
 # data_root = '/datastore/data/cxl/GRIP/data/argo/no_slow_obj_grip'
 # data_root = "data/xincoder/ApolloScape"
 work_dir = 'trained_models/argo/all_data'
 train_data_path = "prediction_train/"
+val_data_path = "prediction_val/"
 test_data_path = "prediction_test/"
 # train_data_file = 'train_data_%d_%d_%d.pkl'%(frame_steps, history_frames, future_frames)
 # test_data_file = 'test_data_%d_%d_%d.pkl'%(frame_steps, history_frames, future_frames)
 train_data_file = 'train_data_%d_%d_%d_%d.pkl'%(frame_steps, history_frames, future_frames, lane_search_radius)
 test_data_file = 'test_data_%d_%d_%d_%d.pkl'%(frame_steps, history_frames, future_frames, lane_search_radius)
+val_data_file = 'val_data_%d_%d_%d_%d.pkl'%(frame_steps, history_frames, future_frames, lane_search_radius)
 save_model_prefix = "model_argo_all_pos_"
 
 

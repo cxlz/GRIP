@@ -11,14 +11,14 @@ from argoverse.utils import centerline_utils
 from shapely.geometry import LineString
 
 import config.configure as config
-from util.map_util import HDMap, LaneSegment
+# from util.map_util import HDMap, LaneSegment
 
 if config.map_type == "argo":
     print("loading ArgoverseMap")
     avm = ArgoverseMap()
-else:
-    print("loading map form %s"%config.map_path)
-    hdmap = HDMap(config.map_path)
+# else:
+#     print("loading map form %s"%config.map_path)
+#     hdmap = HDMap(config.map_path)
 # Please change this to your location
 data_root = config.data_root
 
@@ -166,7 +166,7 @@ def process_trajectory_data(id, city, now_traj_sl:list, trajectory_sl_list:list,
         if len(trajectory_sl_list) == 0 or not np.any([np.array_equal(tmp[:,0], traj[:,0]) for traj in trajectory_sl_list]):
             trajectory_sl_list.append(tmp)
     else:
-        if not lane.successors is None and deepth < 6:
+        if not lane.successors is None and deepth < 100:
             deepth += 1
             for s_id in lane.successors:
                 process_trajectory_data(s_id, city, now_traj_sl, trajectory_sl_list, trajectory, accumulated_s, deepth)
@@ -264,16 +264,16 @@ def process_map_data(center, trajectory, search_radius, point_num, mean_xy, city
 
         map_feature_list = np.array(map_feature_list, dtype="float")
 
-    else:
-        lane_list = hdmap.get_lanes(center, search_radius, point_num)
-        for ln, lane in enumerate(lane_list):
-            lane_id = lane.id
-            for segment in lane.segment:
-                now_map_feature = np.zeros((point_num, total_feature_dimension))
-                segment = np.array(segment).astype("float")
-                for i in range(segment.shape[0]):
-                    now_map_feature[i] = np.array([ln, 0, 0, segment[i][0] - mean_xy[0], segment[i][1] - mean_xy[1], 0, 0, 0, 0, lane.turn, 1], dtype="float")
-                map_feature_list.append(now_map_feature)
+    # else:
+    #     lane_list = hdmap.get_lanes(center, search_radius, point_num)
+    #     for ln, lane in enumerate(lane_list):
+    #         lane_id = lane.id
+    #         for segment in lane.segment:
+    #             now_map_feature = np.zeros((point_num, total_feature_dimension))
+    #             segment = np.array(segment).astype("float")
+    #             for i in range(segment.shape[0]):
+    #                 now_map_feature[i] = np.array([ln, 0, 0, segment[i][0] - mean_xy[0], segment[i][1] - mean_xy[1], 0, 0, 0, 0, lane.turn, 1], dtype="float")
+    #             map_feature_list.append(now_map_feature)
 
     # map_feature_list = np.array(map_feature_list, dtype="float")
     # trajectory_sl_list = np.array(trajectory_sl_list, dtype="float")
@@ -351,7 +351,7 @@ def process_data(pra_now_dict, pra_start_ind, pra_end_ind, pra_observed_last, fr
         map_frame_feature[:map_feature_list.shape[0]] = map_feature_list
         trajectory_frame_feature[:trajectory_sl_list.shape[0]] = trajectory_sl_list    
     except:
-        print(map_feature_list)
+        aaaa = 1
     
     # np.transpose(object_feature_list, (1,0,2))
     object_frame_feature[:num_visible_object+num_non_visible_object] = np.transpose(object_feature_list, (1,0,2))
@@ -398,7 +398,55 @@ def generate_train_data(pra_file_path):
             all_map_list.append(map_frame_feature) 
             all_lane_list.append(curr_lane_label) 
             all_trajectory_list.append(trajectory_frame_feature)
-            break
+
+    # (N, V, T, C) --> (N, C, T, V)
+    all_feature_list = np.array(all_feature_list)
+    all_adjacency_list = np.array(all_adjacency_list)
+    all_mean_list = np.array(all_mean_list)
+    all_map_list = np.array(all_map_list)
+    all_lane_list = np.array(all_lane_list)
+    all_trajectory_list = np.array(all_trajectory_list)
+    try:
+        all_feature_list = np.transpose(all_feature_list, (0, 3, 2, 1))
+        all_map_list = np.transpose(all_map_list, (0, 3, 2, 1))
+        all_trajectory_list = np.transpose(all_trajectory_list, (0, 3, 2, 1))
+    except:
+        print(all_feature_list.shape, all_map_list.shape, all_trajectory_list.shape)
+    # print(all_feature_list.shape, all_adjacency_list.shape)
+    return all_feature_list, all_adjacency_list, all_mean_list, all_map_list, all_lane_list, all_trajectory_list, seq_id, city
+
+
+def generate_test_data(pra_file_path):
+    now_dict, city = get_frame_instance_dict(pra_file_path)
+    frame_id_set = sorted(set(now_dict.keys()))
+    seq_id = int(pra_file_path.split("/")[-1].split(".")[-2].split("_")[-1])
+    all_feature_list = []
+    all_adjacency_list = []
+    all_mean_list = []
+    all_map_list = []
+    all_lane_list = []
+    all_trajectory_list = []
+
+    # get all start frame id
+    start_frame_id_list = frame_id_set[::history_frames]
+    for start_ind in start_frame_id_list:
+        start_ind = int(start_ind)
+        end_ind = int(start_ind + history_frames)
+        observed_last = start_ind + history_frames - 1
+        # print(start_ind, end_ind)
+        for ind in range(start_ind, end_ind):
+            if ind not in frame_id_set:
+                break
+        else:
+            object_frame_feature, neighbor_matrix, mean_xy, map_frame_feature, curr_lane_label, trajectory_frame_feature \
+                 = process_data(now_dict, start_ind, end_ind, observed_last, frame_id_set, city)
+
+            all_feature_list.append(object_frame_feature)
+            all_adjacency_list.append(neighbor_matrix)    
+            all_mean_list.append(mean_xy)  
+            all_map_list.append(map_frame_feature) 
+            all_lane_list.append(curr_lane_label) 
+            all_trajectory_list.append(trajectory_frame_feature)
 
     # (N, V, T, C) --> (N, C, T, V)
     all_feature_list = np.array(all_feature_list)
@@ -412,46 +460,7 @@ def generate_train_data(pra_file_path):
         all_map_list = np.transpose(all_map_list, (0, 3, 2, 1))
         all_trajectory_list = np.transpose(all_trajectory_list, (0, 3, 2, 1))
     # print(all_feature_list.shape, all_adjacency_list.shape)
-    return all_feature_list, all_adjacency_list, all_mean_list, all_map_list, all_lane_list, all_trajectory_list, seq_id
-
-
-def generate_test_data(pra_file_path):
-    now_dict, city = get_frame_instance_dict(pra_file_path)
-    frame_id_set = sorted(set(now_dict.keys()))
-    seq_id = int(pra_file_path.split("/")[-1].split(".")[-2].split("_")[-1])
-    all_feature_list = []
-    all_adjacency_list = []
-    all_mean_list = []
-    all_map_list = []
-
-    # get all start frame id
-    start_frame_id_list = frame_id_set[::history_frames]
-    for start_ind in start_frame_id_list[0]:
-        start_ind = int(start_ind)
-        end_ind = int(start_ind + history_frames)
-        observed_last = start_ind + history_frames - 1
-        # print(start_ind, end_ind)
-        for ind in range(start_ind, end_ind):
-            if ind not in frame_id_set:
-                break
-        else:
-            object_frame_feature, neighbor_matrix, mean_xy, map_frame_feature = process_data(now_dict, start_ind, end_ind, observed_last, frame_id_set, city)
-
-            all_feature_list.append(object_frame_feature)
-            all_adjacency_list.append(neighbor_matrix)    
-            all_mean_list.append(mean_xy)
-            all_map_list.append(map_frame_feature)  
-
-    # (N, V, T, C) --> (N, C, T, V)
-    all_feature_list = np.array(all_feature_list)
-    all_adjacency_list = np.array(all_adjacency_list)
-    all_mean_list = np.array(all_mean_list)
-    all_map_list = np.array(all_map_list)
-    if all_feature_list.shape[0] > 0:
-        all_feature_list = np.transpose(all_feature_list, (0, 3, 2, 1))
-        all_map_list = np.transpose(all_map_list, (0, 3, 2, 1))
-    # print(all_feature_list.shape, all_adjacency_list.shape)
-    return all_feature_list, all_adjacency_list, all_mean_list, all_map_list
+    return all_feature_list, all_adjacency_list, all_mean_list, all_map_list, all_lane_list, all_trajectory_list, seq_id, city
 
 
 def generate_data(pra_file_path_list, pra_is_train=True, save_data=True, idx=-1):
@@ -461,14 +470,14 @@ def generate_data(pra_file_path_list, pra_is_train=True, save_data=True, idx=-1)
     all_map_data = []
     all_lane_label = []
     all_trajetory = []
-    all_seq_id = []
+    all_seq_id_city = []
     # for file_path in pra_file_path_list:
     for file_path in tqdm(pra_file_path_list):
         # print(file_path)
-        if pra_is_train:
-            now_data, now_adjacency, now_mean_xy, now_map_data, now_lane_label, now_trajectory, seq_id = generate_train_data(file_path)
+        if pra_is_train == "train" or pra_is_train == "val":
+            now_data, now_adjacency, now_mean_xy, now_map_data, now_lane_label, now_trajectory, seq_id, city = generate_train_data(file_path)
         else:
-            now_data, now_adjacency, now_mean_xy, now_map_data, now_lane_label, now_trajectory, seq_id = generate_train_data(file_path)
+            now_data, now_adjacency, now_mean_xy, now_map_data, now_lane_label, now_trajectory, seq_id, city = generate_test_data(file_path)
         if now_trajectory.shape[0] > 0:
             all_data.extend(now_data)
             all_adjacency.extend(now_adjacency)
@@ -476,7 +485,7 @@ def generate_data(pra_file_path_list, pra_is_train=True, save_data=True, idx=-1)
             all_map_data.extend(now_map_data)
             all_lane_label.extend(now_lane_label)
             all_trajetory.extend(now_trajectory)
-            all_seq_id.append(seq_id)
+            all_seq_id_city.append([seq_id, city])
 
     all_data = np.array(all_data) #(N, C, T, V)=(5010, 11, 12, 70) Train
     all_adjacency = np.array(all_adjacency) #(5010, 70, 70) Train
@@ -484,7 +493,7 @@ def generate_data(pra_file_path_list, pra_is_train=True, save_data=True, idx=-1)
     all_map_data = np.array(all_map_data)
     all_lane_label = np.array(all_lane_label)
     all_trajetory = np.array(all_trajetory)
-    all_seq_id = np.array(all_seq_id, dtype="int")
+    all_seq_id_city = np.array(all_seq_id_city)
 
     # Train (N, C, T, V)=(5010, 11, 12, 70), (5010, 70, 70), (5010, 2)
     # Test (N, C, T, V)=(415, 11, 6, 70), (415, 70, 70), (415, 2)
@@ -492,39 +501,48 @@ def generate_data(pra_file_path_list, pra_is_train=True, save_data=True, idx=-1)
     # save training_data and trainjing_adjacency into a file.
     if save_data:
         print(np.shape(all_data), np.shape(all_adjacency), np.shape(all_mean_xy), np.shape(all_map_data), np.shape(all_lane_label))
-        if pra_is_train:
-            if idx < 0:
-                save_path = os.path.join(data_root, train_data_path, config.train_data_file)
-            else:
-                save_path = os.path.join(data_root, train_data_path, "%02d_sl_"%idx + config.train_data_file)
-            print("saving train data: [%s]"%save_path)
-        else:
-            if idx < 0:
-                save_path = os.path.join(data_root, test_data_path, config.test_data_file)
-            else:
-                save_path = os.path.join(data_root, test_data_path, "%02d_sl_"%idx + config.test_data_file)
-            print("saving test data: [%s]"%save_path)
+        save_path = ""
+        if pra_is_train == "train":
+            save_path = os.path.join(data_root, train_data_path, "%02d_sl_"%idx + config.train_data_file)
+        elif pra_is_train == "val":
+            save_path = os.path.join(data_root, val_data_path, "%02d_sl_"%idx + config.val_data_file)
+        elif pra_is_train == "test":
+            save_path = os.path.join(data_root, test_data_path, "%02d_sl_"%idx + config.test_data_file)
+
+        print("saving %s data: [%s]"%(pra_is_train, save_path))
+
 
         with open(save_path, 'wb') as writer:
-            pickle.dump([all_data, all_adjacency, all_mean_xy, all_map_data, all_lane_label, all_trajetory, all_seq_id], writer)
+            pickle.dump([all_data, all_adjacency, all_mean_xy, all_map_data, all_lane_label, all_trajetory, all_seq_id_city], writer)
 
     return all_data, all_adjacency, all_mean_xy, all_map_data, all_lane_label, all_trajetory
 
 
 if __name__ == '__main__':
     train_data_path = config.train_data_path
-    test_data_path = config.test_data_path
+    test_data_path  = config.test_data_path
+    val_data_path   = config.val_data_path
     # train_data_path = "prediction_train/"
     train_data_path_list = sorted(glob.glob(os.path.join(data_root, train_data_path + "/raw_data", '*.txt')), key=lambda x: int(x.split(".")[-2].split("_")[-1]))
-    test_data_path_list  = sorted(glob.glob(os.path.join(data_root, test_data_path + "/raw_data",  '*.txt')), key=lambda x: int(x.split(".")[-2].split("_")[-1]))
-    train_data_length = len(train_data_path_list) // 5000
-    for idx in range(train_data_length):#
+    val_data_path_list   = sorted(glob.glob(os.path.join(data_root, val_data_path   + "/raw_data", '*.txt')), key=lambda x: int(x.split(".")[-2].split("_")[-1]))
+    test_data_path_list  = sorted(glob.glob(os.path.join(data_root, test_data_path  + "/raw_data", '*.txt')), key=lambda x: int(x.split(".")[-2].split("_")[-1]))
+    train_data_size = 5000
+    val_data_size   = 2000
+    test_data_size  = 5000
+
+    # val_data_length = len(val_data_path_list) // val_data_size 
+    # for idx in range(val_data_length):#
+    #     print('Generating Validate Data_%02d/%02d'%(idx+1, val_data_length))
+    #     generate_data(val_data_path_list[val_data_size*idx:val_data_size*(idx+1)], pra_is_train="val", idx=idx)
+
+    # test_data_length = len(test_data_path_list) // test_data_size 
+    # for idx in range(test_data_length):#
+    #     print('Generating Testing Data_%02d/%02d'%(idx+1, test_data_length))
+    #     generate_data(test_data_path_list[test_data_size*idx:test_data_size*(idx+1)], pra_is_train="test", idx=idx)
+  
+    train_data_length = len(train_data_path_list) // train_data_size
+    for idx in range(4,train_data_length):#
         print('Generating Training Data_%02d/%02d'%(idx+1, train_data_length))
-        generate_data(train_data_path_list[5000*idx:5000*(idx+1)], pra_is_train=True, idx=idx)
-    test_data_length = len(test_data_path_list) // 2000 
-    for idx in range(test_data_length):#
-        print('Generating Testing Data_%02d/%02d'%(idx+1, test_data_length))
-        generate_data(test_data_path_list[2000*idx:2000*(idx+1)], pra_is_train=False, idx=idx)
-    
+        generate_data(train_data_path_list[train_data_size*idx:train_data_size*(idx+1)], pra_is_train="train", idx=idx)
 
 
