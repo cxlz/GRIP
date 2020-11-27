@@ -68,8 +68,8 @@ class Model(nn.Module):
         self.num_node = self.graph.num_node
         self.out_dim_per_node = out_dim_per_node = config.out_dim_per_node # 2 (x, y) coordinate
         self.seq2seq_car = Seq2Seq(input_size=(encoder_input_size), hidden_size=out_dim_per_node, num_layers=num_layers, dropout=seq2seq_dropout, isCuda=use_cuda)
-        self.seq2seq_human = Seq2Seq(input_size=(encoder_input_size), hidden_size=out_dim_per_node, num_layers=num_layers, dropout=seq2seq_dropout, isCuda=use_cuda)
-        self.seq2seq_bike = Seq2Seq(input_size=(encoder_input_size), hidden_size=out_dim_per_node, num_layers=num_layers, dropout=seq2seq_dropout, isCuda=use_cuda)
+        # self.seq2seq_human = Seq2Seq(input_size=(encoder_input_size), hidden_size=out_dim_per_node, num_layers=num_layers, dropout=seq2seq_dropout, isCuda=use_cuda)
+        # self.seq2seq_bike = Seq2Seq(input_size=(encoder_input_size), hidden_size=out_dim_per_node, num_layers=num_layers, dropout=seq2seq_dropout, isCuda=use_cuda)
 
 
     def reshape_for_lstm(self, feature):
@@ -92,7 +92,7 @@ class Model(nn.Module):
         now_feat = now_feat.permute(0, 3, 2, 1).contiguous() # (N, C, T, V)
         return now_feat
 
-    def forward(self, pra_x:torch.Tensor, pra_map:torch.Tensor, pra_A:torch.Tensor, pra_pred_length:int=6): #, pra_teacher_forcing_ratio:int=0, pra_teacher_location=torch.zeros(1)
+    def forward(self, pra_x:torch.Tensor, pra_A:torch.Tensor, pra_map:torch.Tensor=torch.Tensor(), pra_pred_length:int=6): #, pra_teacher_forcing_ratio:int=0, pra_teacher_location=torch.zeros(1)
         x = pra_x # (N, 4, 6, 120)
         
         # forwad
@@ -135,23 +135,24 @@ class Model(nn.Module):
                 mx, _ = gcn(mx)
             graph_conv_map_feature = self.reshape_for_lstm(mx)
         else:
-            graph_conv_feature = torch.Tensor()
+            graph_conv_map_feature = torch.Tensor()
+            mask = torch.Tensor()
 
         # now_predict.shape = (N, T, V*C)
         self.num_node = x.shape[-1]
-        now_predict_car, now_att_car = self.seq2seq_car(in_data=graph_conv_feature, last_location=last_position[:,-1:,:], map_data=graph_conv_map_feature, pred_length=pra_pred_length, map_mask=mask) #, teacher_forcing_ratio=pra_teacher_forcing_ratio, teacher_location=pra_teacher_location
+        now_predict_car = self.seq2seq_car(in_data=graph_conv_feature, last_location=last_position[:,-1:,:], pred_length=pra_pred_length, map_data=graph_conv_map_feature, map_mask=mask) #, teacher_forcing_ratio=pra_teacher_forcing_ratio, teacher_location=pra_teacher_location
         # now_predict_car = self.reshape_from_lstm(now_predict_car) # (N, C, T, V)
 
-        now_predict_human, now_att_human = self.seq2seq_human(in_data=graph_conv_feature, last_location=last_position[:,-1:,:], map_data=graph_conv_map_feature, pred_length=pra_pred_length, map_mask=mask) #, teacher_forcing_ratio=pra_teacher_forcing_ratio, teacher_location=pra_teacher_location
-        # now_predict_human = self.reshape_from_lstm(now_predict_human) # (N, C, T, V)
+        # now_predict_human, now_att_human = self.seq2seq_human(in_data=graph_conv_feature, last_location=last_position[:,-1:,:], pred_length=pra_pred_length, map_data=graph_conv_map_feature, map_mask=mask) #, teacher_forcing_ratio=pra_teacher_forcing_ratio, teacher_location=pra_teacher_location
+        # # now_predict_human = self.reshape_from_lstm(now_predict_human) # (N, C, T, V)
 
-        now_predict_bike, now_att_bike = self.seq2seq_bike(in_data=graph_conv_feature, last_location=last_position[:,-1:,:], map_data=graph_conv_map_feature, pred_length=pra_pred_length, map_mask=mask) #, teacher_forcing_ratio=pra_teacher_forcing_ratio, teacher_location=pra_teacher_location
-        # now_predict_bike = self.reshape_from_lstm(now_predict_bike) # (N, C, T, V)
+        # now_predict_bike, now_att_bike = self.seq2seq_bike(in_data=graph_conv_feature, last_location=last_position[:,-1:,:], pred_length=pra_pred_length, map_data=graph_conv_map_feature, map_mask=mask) #, teacher_forcing_ratio=pra_teacher_forcing_ratio, teacher_location=pra_teacher_location
+        # # now_predict_bike = self.reshape_from_lstm(now_predict_bike) # (N, C, T, V)
 
-        now_predict = (now_predict_car + now_predict_human + now_predict_bike)/3.
-        now_att = (now_att_car + now_att_human + now_att_bike)/3.
-        return now_predict, now_att
+        # now_predict = (now_predict_car + now_predict_human + now_predict_bike)/3.
+        # now_att = (now_att_car + now_att_human + now_att_bike)/3.
+        return now_predict_car
 
-if __name__ == '__main__':
-    model = Model(in_channels=3, pred_length=6, graph_args={}, edge_importance_weighting=True)
-    print(model)
+# if __name__ == '__main__':
+#     model = Model(in_channels=3, pred_length=6, graph_args={}, edge_importance_weighting=True)
+#     print(model)

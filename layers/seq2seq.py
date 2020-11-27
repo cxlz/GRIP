@@ -61,7 +61,7 @@ class Seq2Seq(nn.Module):
         self.encoder_map = EncoderRNN(input_size, hidden_size, num_layers, isCuda)
         self.attention = Attention(hidden_size*30)
 
-    def forward(self, in_data, last_location, map_data, pred_length:int=6, map_mask=torch.Tensor()): #, teacher_forcing_ratio:int=0, teacher_location=torch.zeros(1)
+    def forward(self, in_data, last_location, pred_length:int=6, map_data=torch.Tensor(), map_mask=torch.Tensor()): #, teacher_forcing_ratio:int=0, teacher_location=torch.zeros(1)
         
         
         batch_size = in_data.shape[0]
@@ -91,6 +91,8 @@ class Seq2Seq(nn.Module):
             hidden = hidden + map_hidden
             # hidden = torch.cat((hidden, map_hidden), dim=-1)
             hidden = torch.tanh(hidden)
+        # else:
+        #     att = torch.zeros(batch_size, config.max_num_map)
         decoder_input = last_location
         for t in range(self.pred_length):
             # encoded_input = torch.cat((now_label, encoded_input), dim=-1) # merge class label into input feature
@@ -102,7 +104,7 @@ class Seq2Seq(nn.Module):
             decoder_input = now_out
 
         # att = None
-        return outputs.permute(0,2,1).unsqueeze(-1), att
+        return outputs.permute(0,2,1).unsqueeze(-1)
 
 ####################################################
 ####################################################
