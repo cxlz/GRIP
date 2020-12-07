@@ -168,7 +168,9 @@ def process_trajectory_data(id, city, now_traj_sl:list, trajectory_sl_list:list,
     else:
         if not lane.successors is None and deepth < 100:
             deepth += 1
+            # cur_idx = len(now_traj_sl)
             for s_id in lane.successors:
+                # now_traj_sl = now_traj_sl[0:cur_idx]
                 process_trajectory_data(s_id, city, now_traj_sl, trajectory_sl_list, trajectory, accumulated_s, deepth)
         else:
             while len(now_traj_sl) < trajectory.shape[0]:
@@ -177,7 +179,10 @@ def process_trajectory_data(id, city, now_traj_sl:list, trajectory_sl_list:list,
             if len(trajectory_sl_list) == 0 or not np.any([np.array_equal(tmp[:,0], traj[:,0]) for traj in trajectory_sl_list]):
                 trajectory_sl_list.append(tmp)
     accumulated_s -= lane_length
-    now_traj_sl = now_traj_sl[:ori_idx]
+    # tmp = now_traj_sl[0:ori_idx]
+    for l in range(ori_idx, len(now_traj_sl)):
+        now_traj_sl.pop()
+    # now_traj_sl = now_traj_sl[0:ori_idx]
     return
 
 
@@ -240,10 +245,10 @@ def process_map_data(center, trajectory, search_radius, point_num, mean_xy, city
                     idList.append(curr_lane.l_neighbor_id)
                 if not curr_lane.r_neighbor_id is None and curr_lane.r_neighbor_id not in idList:
                     idList.append(curr_lane.r_neighbor_id)
-                if not curr_lane.predecessors is None:
-                    for p_id in curr_lane.predecessors:
-                        if p_id not in idList:
-                            idList.append(p_id)
+                # if not curr_lane.predecessors is None:
+                #     for p_id in curr_lane.predecessors:
+                #         if p_id not in idList:
+                #             idList.append(p_id)
                 # if not curr_lane.successors is None:
                 #     for s_id in curr_lane.successors:
                 #         if s_id not in idList:
@@ -324,7 +329,7 @@ def process_data(pra_now_dict, pra_start_ind, pra_end_ind, pra_observed_last, fr
     # object_feature_list has shape of (frame#, object#, 11) 11 = 10features + 1mark
     object_feature_list = np.array(object_feature_list)
 
-    ego_position = object_feature_list[history_frames - 1, 0, 3:5] + m_xy
+    ego_position = object_feature_list[0, 0, 3:5] + m_xy
     ego_trajectory = object_feature_list[:, 0, 3:].copy()
     ego_trajectory[:, :2] += m_xy
 
@@ -515,7 +520,7 @@ def generate_data(pra_file_path_list, pra_is_train=True, save_data=True, idx=-1)
         with open(save_path, 'wb') as writer:
             pickle.dump([all_data, all_adjacency, all_mean_xy, all_map_data, all_lane_label, all_trajetory, all_seq_id_city], writer)
 
-    return all_data, all_adjacency, all_mean_xy, all_map_data, all_lane_label, all_trajetory
+    # return all_data, all_adjacency, all_mean_xy, all_map_data, all_lane_label, all_trajetory
 
 
 if __name__ == '__main__':
@@ -525,24 +530,37 @@ if __name__ == '__main__':
     # train_data_path = "prediction_train/"
     train_data_path_list = sorted(glob.glob(os.path.join(data_root, train_data_path + "/raw_data", '*.txt')), key=lambda x: int(x.split(".")[-2].split("_")[-1]))
     val_data_path_list   = sorted(glob.glob(os.path.join(data_root, val_data_path   + "/raw_data", '*.txt')), key=lambda x: int(x.split(".")[-2].split("_")[-1]))
-    test_data_path_list  = sorted(glob.glob(os.path.join(data_root, test_data_path  + "/raw_data", '*.txt')), key=lambda x: int(x.split(".")[-2].split("_")[-1]))
-    train_data_size = 5000
-    val_data_size   = 2000
+    # test_data_path_list  = sorted(glob.glob(os.path.join(data_root, test_data_path  + "/raw_data", '*.txt')), key=lambda x: int(x.split(".")[-2].split("_")[-1]))
+    train_data_size = 10000
+    val_data_size   = 1000
     test_data_size  = 5000
 
-    # val_data_length = len(val_data_path_list) // val_data_size 
-    # for idx in range(val_data_length):#
-    #     print('Generating Validate Data_%02d/%02d'%(idx+1, val_data_length))
-    #     generate_data(val_data_path_list[val_data_size*idx:val_data_size*(idx+1)], pra_is_train="val", idx=idx)
+    train_data_length = len(train_data_path_list) // train_data_size
+    if len(train_data_path_list) % train_data_size != 0:
+        train_data_length += 1 
+    for idx in range(0,train_data_length):#
+        print('Generating Training Data_%02d/%02d'%(idx+1, train_data_length))
+        start_index = idx * train_data_size
+        end_index = min((idx + 1) * train_data_size, len(train_data_path_list))
+        generate_data(train_data_path_list[start_index:end_index], pra_is_train="train", idx=idx)
 
-    # test_data_length = len(test_data_path_list) // test_data_size 
+    val_data_length = len(val_data_path_list) // val_data_size
+    if len(val_data_path_list) % val_data_size != 0:
+        val_data_length += 1 
+    for idx in range(val_data_length):#
+        print('Generating Validate Data_%02d/%02d'%(idx+1, val_data_length))
+        start_index = idx * val_data_size
+        end_index = min((idx + 1) * val_data_size, len(val_data_path_list))
+        generate_data(val_data_path_list[start_index:end_index], pra_is_train="val", idx=idx)
+
+    # test_data_length = len(test_data_path_list) // test_data_size
+    # if len(test_data_path_list) % test_data_size != 0:
+    #     test_data_length += 1 
     # for idx in range(test_data_length):#
     #     print('Generating Testing Data_%02d/%02d'%(idx+1, test_data_length))
-    #     generate_data(test_data_path_list[test_data_size*idx:test_data_size*(idx+1)], pra_is_train="test", idx=idx)
+    #     start_index = idx * test_data_size
+    #     end_index = min((idx + 1) * test_data_size, len(test_data_path_list))
+    #     generate_data(test_data_path_list[start_index:end_index], pra_is_train="test", idx=idx)
   
-    train_data_length = len(train_data_path_list) // train_data_size
-    for idx in range(4,train_data_length):#
-        print('Generating Training Data_%02d/%02d'%(idx+1, train_data_length))
-        generate_data(train_data_path_list[train_data_size*idx:train_data_size*(idx+1)], pra_is_train="train", idx=idx)
 
 

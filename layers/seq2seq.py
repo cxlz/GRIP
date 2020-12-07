@@ -59,12 +59,12 @@ class Seq2Seq(nn.Module):
         self.encoder = EncoderRNN(input_size, hidden_size, num_layers, isCuda)
         self.decoder = DecoderRNN(hidden_size, hidden_size, num_layers, dropout, isCuda)
         self.encoder_map = EncoderRNN(input_size, hidden_size, num_layers, isCuda)
-        self.attention = Attention(hidden_size*30)
+        self.maxpool = nn.MaxPool1d(hidden_size*30)
 
     def forward(self, in_data, last_location, map_data, pred_length:int=6, map_mask=torch.Tensor()): #, teacher_forcing_ratio:int=0, teacher_location=torch.zeros(1)
         
         
-        batch_size = in_data.shape[0]
+        batch_size = in_data.shape[0] // config.max_num_map
         out_dim = self.decoder.output_size
         self.pred_length = pred_length
 
@@ -74,7 +74,7 @@ class Seq2Seq(nn.Module):
             outputs = outputs.cuda()    
             # hidden = hidden.cuda()
             #    
-        encoded_output, hidden = self.encoder(in_data) #in_data (N, T, C) --> hidden (L, N, H)
+        encoded_output, hidden = self.encoder(in_data) #in_data (NV, T, C) --> hidden (L, NV, H)
 
 
 
@@ -91,6 +91,18 @@ class Seq2Seq(nn.Module):
             hidden = hidden + map_hidden
             # hidden = torch.cat((hidden, map_hidden), dim=-1)
             hidden = torch.tanh(hidden)
+        else:
+            hidden = hidden.view((hidden.shape[0], batch_size, -1, hidden.shape[-1])).contiguous() #(L, N, V, H)
+            last_location = last_location.view(batch_size, -1, last_location.shape[-2], last_location.shape[-1]).contiguous()
+            # max_hidden = self.maxpool(hidden[-1]).squeeze(-1) #(N, V)
+            # att = torch.softmax(max_hidden, dim=1) #(N)
+            # argmax_att = torch.argmax(att, dim=-1)
+            # hidden = hidden.gather(dim=2, index=argmax_att.unsqueeze(0).unsqueeze(-1).unsqueeze(-1).repeat((hidden.shape[0], 1, 1, hidden.shape[-1]))).squeeze(-2) #(L, N, H)
+            # last_location = last_location.gather(dim=1, index=argmax_att.unsqueeze(-1).unsqueeze(-1).unsqueeze(-1).repeat((1, 1, last_location.shape[-2], last_location.shape[-1]))).squeeze(1)
+            hidden = hidden[:,:,0].contiguous()
+            last_location = last_location[:,0].contiguous()
+            att = torch.zeros((batch_size, config.max_num_map)).to(config.dev)
+            att[:,0] = 1
         decoder_input = last_location
         for t in range(self.pred_length):
             # encoded_input = torch.cat((now_label, encoded_input), dim=-1) # merge class label into input feature

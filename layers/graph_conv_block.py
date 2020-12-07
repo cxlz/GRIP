@@ -48,8 +48,8 @@ class Graph_Conv_Block(nn.Module):
 
     def forward(self, x, A=torch.Tensor()):
         res = x
-        if A.shape[0] > 0:
-            x, A = self.gcn(x, A)
+        # if A.shape[0] > 0:
+        #     x, A = self.gcn(x, A)
         x = self.tcn(x)
         x = x + res
         return self.relu(x), A

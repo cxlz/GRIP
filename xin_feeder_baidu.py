@@ -44,6 +44,8 @@ class Feeder(torch.utils.data.Dataset):
             self.all_mean_xy = self.all_mean_xy[train_id_list]
             self.all_map_feature = self.all_map_feature[train_id_list]
             self.all_lane_label = self.all_lane_label[train_id_list]
+            self.all_trajectory = self.all_trajectory[train_id_list]
+            self.all_seq_id_city = self.all_seq_id_city[train_id_list]
 
         elif train_val_test.lower() == 'val':
             self.all_feature = self.all_feature[val_id_list]
@@ -51,14 +53,23 @@ class Feeder(torch.utils.data.Dataset):
             self.all_mean_xy = self.all_mean_xy[val_id_list]
             self.all_map_feature = self.all_map_feature[val_id_list]
             self.all_lane_label = self.all_lane_label[val_id_list]
+            self.all_trajectory = self.all_trajectory[val_id_list]
+            self.all_seq_id_city = self.all_seq_id_city[val_id_list]
 
         self.graph = Graph(**graph_args) #num_node = 120,max_hop = 1
 
     def load_data(self):
         with open(self.data_path, 'rb') as reader:
             # Training (N, C, T, V)=(5010, 11, 12, 120), (5010, 120, 120), (5010, 2)
-            [self.all_feature, self.all_adjacency, self.all_mean_xy, 
-                self.all_map_feature, self.all_lane_label, self.all_trajectory] = pickle.load(reader)
+            [
+                self.all_feature, 
+                self.all_adjacency, 
+                self.all_mean_xy, 
+                self.all_map_feature, 
+                self.all_lane_label, 
+                self.all_trajectory, 
+                self.all_seq_id_city,
+            ] = pickle.load(reader)
             
 
     def __len__(self):
@@ -71,6 +82,7 @@ class Feeder(torch.utils.data.Dataset):
         now_map_feature = self.all_map_feature[idx].copy() # (C, T, V) = (11, 10, 100)
         now_lane_label = self.all_lane_label[idx].copy()
         now_trajectory = self.all_trajectory[idx].copy()
+        now_seq_id_city = self.all_seq_id_city[idx].copy()
 
         if self.train_val_test.lower() == 'train' and np.random.random()>0.5:
             angle = 2 * np.pi * np.random.random()
@@ -98,8 +110,13 @@ class Feeder(torch.utils.data.Dataset):
 
         now_adjacency = self.graph.get_adjacency(self.all_adjacency[idx])
         now_A = self.graph.normalize_adjacency(now_adjacency)
+        if now_seq_id_city[1].lower() == "PIT":
+            now_seq_id_city[1] = 0
+        else:
+            now_seq_id_city[1] = 1
+        now_seq_id_city = now_seq_id_city.astype("float")
         
-        return now_feature, now_A, now_mean_xy, now_map_feature, now_lane_label, now_trajectory
+        return now_feature, now_A, now_mean_xy, now_map_feature, now_lane_label, now_trajectory, now_seq_id_city
 
 
 

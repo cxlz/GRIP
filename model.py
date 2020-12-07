@@ -121,10 +121,10 @@ class Model(nn.Module):
         # x = x + P
                 
         # prepare for seq2seq lstm model
-        # graph_conv_feature = self.reshape_for_lstm(x)
-        # last_position = self.reshape_for_lstm(pra_x[:,:2]) #(N, C, T, V)[:, :2] -> (N, T, V*2) [(N*V, T, C)]
-        graph_conv_feature = x[:,:,:,0].permute(0,2,1)
-        last_position = pra_x[:,:2,:,0].permute(0,2,1)
+        graph_conv_feature = self.reshape_for_lstm(x)
+        last_position = self.reshape_for_lstm(pra_x[:,:2]) #(N, C, T, V)[:, :2] -> (N, T, V*2) [(N*V, T, 2)]
+        # graph_conv_feature = x[:,:,:,0].permute(0,2,1)
+        # last_position = pra_x[:,:2,:,0].permute(0,2,1)
         # if pra_teacher_forcing_ratio>0 and pra_teacher_location.dim() > 1: #
         #     pra_teacher_location = self.reshape_for_lstm(pra_teacher_location)
         if config.use_map:
@@ -135,7 +135,8 @@ class Model(nn.Module):
                 mx, _ = gcn(mx)
             graph_conv_map_feature = self.reshape_for_lstm(mx)
         else:
-            graph_conv_feature = torch.Tensor()
+            graph_conv_map_feature = torch.Tensor()
+            mask = torch.Tensor()
 
         # now_predict.shape = (N, T, V*C)
         self.num_node = x.shape[-1]
