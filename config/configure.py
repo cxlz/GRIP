@@ -5,8 +5,8 @@ import os
 total_feature_dimension = 10 + 1
 data_time_resolution = 0.1
 frame_steps = 1
-history_frames = 10 # 3 second * 2 frame/second
-future_frames = 15 # 3 second * 2 frame/second
+history_frames = 20 # 3 second * 2 frame/second
+future_frames = 30 # 3 second * 2 frame/second
 # xy_range = 120 # max_x_range=121, max_y_range=118
 max_num_object = 1 # maximum number of observed objects is 70
 max_num_map = 10 # nearby_lanes 32
@@ -21,10 +21,10 @@ map_type = "argo"
 
 
 # data_root = 'data/our_data/0908'
-data_root = '/datastore/data/cxl/GRIP/data/argo/all'
+data_root = '/datastore/data/cxl/new_model/data/argo/all_data'
 # data_root = '/datastore/data/cxl/GRIP/data/argo/no_slow_obj_grip'
 # data_root = "data/xincoder/ApolloScape"
-work_dir = '/datastore/data/cxl/GRIP/trained_models/argo/all'
+work_dir = '/datastore/data/cxl/GRIP/trained_models/argo/all_data'
 train_data_path = "prediction_train/"
 val_data_path = "prediction_val/"
 test_data_path = "prediction_test/"
@@ -33,7 +33,7 @@ test_data_path = "prediction_test/"
 train_data_file = 'train_data_%d_%d_%d_%d.pkl'%(frame_steps, history_frames, future_frames, lane_search_radius)
 test_data_file = 'test_data_%d_%d_%d_%d.pkl'%(frame_steps, history_frames, future_frames, lane_search_radius)
 val_data_file = 'val_data_%d_%d_%d_%d.pkl'%(frame_steps, history_frames, future_frames, lane_search_radius)
-save_model_prefix = "model_argo_all_sl_10l_"
+save_model_prefix = "model_argo_all_sl_vel_"
 
 
 
@@ -46,6 +46,7 @@ base_lr = 0.001
 lr_decay_epoch = 5
 lr_decay = 0.5
 dropout = 0.5
+sample_times = 6
 
 log_file = os.path.join(work_dir,'log_test.txt')
 test_result_file = 'prediction_result.txt'
@@ -64,7 +65,7 @@ use_history = False
 multi_lane = False
 convert_model = False
 
-pretrained_model_path = '/datastore/data/cxl/GRIP/trained_models/argo/all/model_argo_all_sl_10l_1210_10:41:39_epoch_0024.pt'
+pretrained_model_path = '/datastore/data/cxl/GRIP/trained_models/argo/all_data/model_argo_all_sl_vel_1211_01:19:24_epoch_0024.pt'
 view = True 
 save_view = False
 save_view_path = os.path.join(work_dir, "view", pretrained_model_path.split(".")[0].split("/")[-1])

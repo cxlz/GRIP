@@ -111,7 +111,7 @@ class Feeder(torch.utils.data.Dataset):
 
         now_adjacency = self.graph.get_adjacency(self.all_adjacency[idx])
         now_A = self.graph.normalize_adjacency(now_adjacency)
-        if now_seq_id_city[1].lower() == "PIT":
+        if now_seq_id_city[1].lower() == "pit":
             now_seq_id_city[1] = 0
         else:
             now_seq_id_city[1] = 1

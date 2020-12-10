@@ -17,6 +17,8 @@ import time
 from types import ModuleType
 from util.map_util import HDMap
 
+from argoverse.evaluation.competition_util import generate_forecasting_h5
+from argoverse.evaluation import eval_forecasting
 from argoverse.map_representation.map_api import ArgoverseMap
 from argoverse.utils import centerline_utils
 from shapely.geometry import LineString
@@ -277,14 +279,8 @@ def point_from_lane(lane_id, s, l, city):
     try:
         lane = avm.city_lane_centerlines_dict[city][lane_id]
     except:
-        try:
-            # print("city: ", city)
-            city = "PIT" if city == "MIA" else "MIA"
-            lane = avm.city_lane_centerlines_dict[city][lane_id]
-        except:
-            # print(city, lane_id)
-            return 0, 0
-    
+        print(city, lane_id)
+        return 0, 0
     segment = lane.centerline
     lane_string = LineString(segment)
     curr_point = lane_string.interpolate(s).bounds
@@ -303,62 +299,99 @@ def get_lane_length(lane_id, city):
     try:
         lane = avm.city_lane_centerlines_dict[city][lane_id]
     except:
-        try:
-            city = "PIT" if city == "MIA" else "MIA"
-            lane = avm.city_lane_centerlines_dict[city][lane_id]
-        except:
-            print(city, lane_id)
+        print(city, lane_id)
+        return 0
     segment = lane.centerline
     lane_string = LineString(segment)
     lane_length = lane_string.length
     return lane_length
 
-def get_xy_trajectory(predicted, ori_mean_xy, seq_id_city, ori_lane_id, now_history_frames):
+def get_xy_trajectory(predicted, now_mean_xy, seq_id_city, now_lane_id, now_history_frames, future_lane_id=[]):
     """ 
-    predicted:   [N, C=2, T, V]
-    ori_mean_xy: [N, 2]
-    seq_id_city: [N, 2]
-    ori_lane_id: [N, T, V]
+    predicted:   [C=2, T, V]
+    now_mean_xy: [2]
+    seq_id_city: [2]
+    now_lane_id: [T, V]
     """
     now_pred = torch.zeros(predicted.shape).to(config.dev)
-    for n in range(predicted.shape[0]):
-        curr_pred = predicted[n,:,:,0].float().detach().cpu().numpy()
-        mean_xy = ori_mean_xy[n].float().detach().cpu().numpy() 
-        curr_seq_id_city = seq_id_city[n]
-        city = curr_seq_id_city[1].long().item()
+    predicted = predicted[:,:,0].float().detach().cpu().numpy()
+    mean_xy = now_mean_xy.float().detach().cpu().numpy() 
+    curr_seq_id_city = seq_id_city
+    city = curr_seq_id_city[1].long().item()
 
+    lane_id = now_lane_id[:,0].long().detach().cpu().numpy()
+    curr_lane_id = lane_id[now_history_frames - 1]
+    if curr_lane_id == 0:
+        return now_pred
+    _, uni_idx = np.unique(lane_id, return_index=True)
+    lane_id = lane_id[sorted(uni_idx)]
+    if future_lane_id:
+        lane_id = np.concatenate((lane_id, future_lane_id), axis=0)
+    city = "PIT" if city == 0 else "MIA"
+    l_idx = 0
+    lane_length = 0 
+    accumulated_s = 0
+    for l_idx in range(len(lane_id)):
+        if lane_id[l_idx] != 0:
+            lane_length = get_lane_length(lane_id[l_idx], city)
+            if lane_id[l_idx] == curr_lane_id:
+                break
+            accumulated_s += lane_length
+    
+    for t in range(predicted.shape[1]):
+        s = predicted[0, t] - accumulated_s
+        l = predicted[1, t]
+        if s > lane_length and l_idx + 1 < len(lane_id):
+            l_idx += 1
+            if lane_id[l_idx] != 0:
+                accumulated_s += lane_length
+                s -= lane_length
+                curr_lane_id = lane_id[l_idx]
+                lane_length = get_lane_length(curr_lane_id, city)
+        x, y = point_from_lane(curr_lane_id, s, l, city)
+        if x != 0 or y != 0:
+            now_pred[0,t,0] = x - mean_xy[0]
+            now_pred[1,t,0] = y - mean_xy[1]    
+    return now_pred
+
+def get_future_lane_id(now_lane_ids, curr_lane_id, city, future_s, future_lane_ids):
+    curr_lane = avm.city_lane_centerlines_dict[city][curr_lane_id]
+    if not curr_lane.successors is None:
+        for s_id in curr_lane.successors:
+            s_lane_length = get_lane_length(s_id, city)
+            now_lane_ids.append(s_id)
+            if s_lane_length >= future_s:
+                future_lane_ids.append(now_lane_ids.copy())
+            else:
+                get_future_lane_id(now_lane_ids, s_id, city, future_s - s_lane_length, future_lane_ids)
+            now_lane_ids.pop()
+
+
+def get_lane_id(predicted, ori_lane_id, seq_id_city):
+    overall_lane_ids = []
+    for n in range(predicted.shape[0]):
+        now_pred_s = predicted[n,0,-1,0].item()
+        city = seq_id_city[n, 1].item()
         lane_id = ori_lane_id[n,:,0].long().detach().cpu().numpy()
-        curr_lane_id = lane_id[now_history_frames]
-        if curr_lane_id == 0:
-            continue
         _, uni_idx = np.unique(lane_id, return_index=True)
         lane_id = lane_id[sorted(uni_idx)]
         city = "PIT" if city == 0 else "MIA"
-        l_idx = 0
-        lane_length = 0 
         accumulated_s = 0
+        curr_lane_id = 0
         for l_idx in range(len(lane_id)):
             if lane_id[l_idx] != 0:
                 lane_length = get_lane_length(lane_id[l_idx], city)
-                if lane_id[l_idx] == curr_lane_id:
-                    break
                 accumulated_s += lane_length
+                curr_lane_id = lane_id[l_idx]
+            else:
+                break
+        now_lane_ids = []
+        future_lane_ids = []
+        if accumulated_s < now_pred_s and curr_lane_id != 0:
+            get_future_lane_id(now_lane_ids, curr_lane_id, city, now_pred_s - accumulated_s, future_lane_ids)
+        overall_lane_ids.append(future_lane_ids)
+    return overall_lane_ids
         
-        for t in range(curr_pred.shape[1]):
-            s = curr_pred[0, t] - accumulated_s
-            l = curr_pred[1, t]
-            if s > lane_length and l_idx + 1 < len(lane_id):
-                l_idx += 1
-                if lane_id[l_idx] != 0:
-                    accumulated_s += lane_length
-                    s -= lane_length
-                    curr_lane_id = lane_id[l_idx]
-                    lane_length = get_lane_length(curr_lane_id, city)
-            x, y = point_from_lane(curr_lane_id, s, l, city)
-            if x != 0 or y != 0:
-                now_pred[n,0,t,0] = x - mean_xy[0]
-                now_pred[n,1,t,0] = y - mean_xy[1]    
-    return now_pred
 
 def train_model(pra_model, pra_data_loader, pra_optimizer, pra_epoch_log):
     # pra_model.to(dev)
@@ -386,31 +419,29 @@ def train_model(pra_model, pra_data_loader, pra_optimizer, pra_epoch_log):
             # for now_history_frames in range(1, data.shape[-2]):
             input_data = data[:,:,:now_history_frames,:] # (N, C, T, V)=(N, 4, 6, 120)
             output_loc_GT = data[:,:2,now_history_frames:,:] # (N, C, T, V)=(N, 2, 6, 120)
-            output_mask = data[:,-1:,now_history_frames:,:] # (N, C, T, V)=(N, 1, 6, 120)
             input_trajectory = trajectory[:,:,:now_history_frames,:]
             output_trajectory_GT = trajectory[:,:2,now_history_frames:,:] # (N, C, T, V)=(N, 2, 6, 120)
-            history_output_trajectory_GT = trajectory[:,:2,:now_history_frames,:]
-
-            output_mask = trajectory[:,-1:,now_history_frames:,:] # (N, C, T, V)=(N, 1, 6, 120)
-            history_output_mask = trajectory[:,-1:,:now_history_frames,:] # (N, C, T, V)=(N, 1, 6, 120)
             
             A = A.float().to(dev)
 
             predicted, att = pra_model(pra_x=input_trajectory, pra_map=trajectory, pra_A=A, pra_pred_length=output_trajectory_GT.shape[-2]) #, pra_teacher_forcing_ratio=0, pra_teacher_location=output_loc_GT (N, C, T, V)=(N, 2, 6, 120)
+            
+            argmax_att = torch.argmax(att, dim=-1).unsqueeze(-1).unsqueeze(-1).unsqueeze(-1)
+            trajectory = trajectory.gather(dim=-1, index=argmax_att.repeat((1, trajectory.shape[1], trajectory.shape[2], 1)))
+
+            output_trajectory_GT = trajectory[:,:2,now_history_frames:,:1]
+            history_output_trajectory_GT = trajectory[:,:2,:now_history_frames,:1]
+            output_mask = trajectory[:,-1:,now_history_frames:,:1] # (N, C, T, V)=(N, 1, 6, 120)
+            history_output_mask = trajectory[:,-1:,:now_history_frames,:1] # (N, C, T, V)=(N, 1, 6, 120)
 
             history_predicted = predicted[:,:,:now_history_frames] * rescale_xy
             predicted = predicted[:,:,now_history_frames:] * rescale_xy
-            output_loc_GT = output_loc_GT * rescale_xy
             output_trajectory_GT = output_trajectory_GT * rescale_xy
             history_output_trajectory_GT = history_output_trajectory_GT * rescale_xy
-            
-
-            argmax_att = torch.argmax(att, dim=-1).unsqueeze(-1).unsqueeze(-1).unsqueeze(-1)
-            output_trajectory_GT = output_trajectory_GT.gather(dim=-1, index=argmax_att.repeat((1, output_trajectory_GT.shape[1], output_trajectory_GT.shape[2], 1)))
-            history_output_trajectory_GT = history_output_trajectory_GT.gather(dim=-1, index=argmax_att.repeat((1, history_output_trajectory_GT.shape[1], history_output_trajectory_GT.shape[2], 1)))
+          
+            # overall_loss
             overall_sum_time, overall_num, _ = compute_RMSE(predicted[:,:,:,0:1], output_trajectory_GT[:,:,:,0:1], output_mask[:,:,:,0:1], pra_error_order=2)
             history_overall_sum_time, history_overall_num, _ = compute_RMSE(history_predicted[:,:,:,0:1], history_output_trajectory_GT[:,:,:,0:1], history_output_mask[:,:,:,0:1], pra_error_order=2)
-            # overall_loss
             total_loss = config.loss_weight[0] * torch.sum(overall_sum_time) / torch.max(torch.sum(overall_num), torch.ones(1,).to(dev)) #(1,)
             if config.use_map and config.use_celoss:
                 celoss = config.loss_weight[2] * celossfunc(att, lane_label)
@@ -454,7 +485,6 @@ def val_model(pra_model, pra_data_loader):
         for now_history_frames in range(history_frames, history_frames + 1):
             input_data = data[:,:,:now_history_frames,:] # (N, C, T, V)=(N, 4, 6, 120)
             output_loc_GT = data[:,:2,now_history_frames:,:] # (N, C, T, V)=(N, 2, 6, 120)
-            output_mask = data[:,-1:,now_history_frames:,:] # (N, C, T, V)=(N, 1, 6, 120)
 
             ori_output_loc_GT = no_norm_loc_data[:,:2,now_history_frames:,:]
             ori_history_output_loc_GT = no_norm_loc_data[:,:2,:now_history_frames,:]
@@ -465,6 +495,89 @@ def val_model(pra_model, pra_data_loader):
 
             A = A.float().to(dev)
             predicted, att = pra_model(pra_x=input_trajectory, pra_map=trajectory, pra_A=A, pra_pred_length=output_trajectory_GT.shape[-2]) #, pra_teacher_forcing_ratio=0, pra_teacher_location=output_loc_GT (N, C, T, V)=(N, 2, 6, 120)
+
+            argmax_att = torch.argmax(att, dim=-1).unsqueeze(-1).unsqueeze(-1).unsqueeze(-1).repeat((1, ori_trajectory.shape[1], ori_trajectory.shape[2], 1))
+            ori_trajectory = ori_trajectory.float().to(config.dev)
+            ori_trajectory = ori_trajectory.float().gather(dim=-1, index=argmax_att)
+            # ori_trajectory = ori_trajectory[:,:,:,:1]
+
+            ori_output_last_trajectory = ori_trajectory[:,1:3,now_history_frames-1:now_history_frames,:1]
+            ori_lane_id = ori_trajectory[:,0]
+            
+            predicted = predicted * rescale_xy
+            if config.vel_mode:
+                for ind in range(1, predicted.shape[-2]):
+                    predicted[:,:,ind] = torch.sum(predicted[:,:,ind-1:ind+1], dim=-2)
+                predicted += ori_output_last_trajectory
+
+            """ 
+            predicted:   [N, C=2, T, V]
+            ori_mean_xy: [N, 2]
+            seq_id_city: [N, 2]
+            ori_lane_id: [N, T, V]
+            """
+            for n, (now_pred, now_mean_xy, now_seq_id_city, now_lane_id) in enumerate(zip(predicted, ori_mean_xy, seq_id_city, ori_lane_id)):
+                predicted[n] = get_xy_trajectory(now_pred, now_mean_xy, now_seq_id_city, now_lane_id, now_history_frames)
+
+            argmax_att = torch.argmax(att, dim=-1).unsqueeze(-1).unsqueeze(-1).unsqueeze(-1)
+            ori_output_loc_GT = ori_output_loc_GT.gather(dim=-1, index=argmax_att.repeat((1, ori_output_loc_GT.shape[1], ori_output_loc_GT.shape[2], 1)))
+
+            overall_sum_time, overall_num, x2y2 = compute_RMSE(predicted[:,:,:,0:1], ori_output_loc_GT[:,:,:,0:1], output_mask[:,:,:,0:1])       
+            now_x2y2 = x2y2.detach().cpu().numpy()
+            now_x2y2 = now_x2y2.sum(axis=-1)
+            overall_num = overall_num.detach().cpu().numpy()
+            
+            all_overall_num_list.extend(overall_num)
+            all_overall_sum_list.extend(now_x2y2)
+
+            now_pred = predicted.detach().cpu().numpy() # (N, C, T, V)=(N, 2, 6, 120)
+            now_ori_data = ori_data.detach().cpu().numpy() # (N, C, T, V)=(N, 11, 6, 120)
+            now_map_data = ori_map_data.detach().cpu().numpy()
+            now_att = att.detach().cpu().numpy()
+            if config.view:
+                visulize(now_pred[:,:,:,0:1], now_ori_data[:, :5, :, 0:1], now_ori_data[:, -1:, -1:, 0:1], now_map_data[:, 3:5], now_att, lane_label)
+
+    all_overall_sum_list = np.array(all_overall_sum_list)
+    all_overall_num_list = np.array(all_overall_num_list)
+    return all_overall_sum_list, all_overall_num_list
+
+
+
+def test_model(pra_model, pra_data_loader, all_pred_trajectory, all_gt_trajectory, all_city):
+    # pra_model.to(dev)
+    pra_model.eval()
+    rescale_xy = torch.ones((1,2,1,1)).to(dev)
+    rescale_xy[:,0] = max_x
+    rescale_xy[:,1] = max_y
+    all_overall_sum_list = []
+    all_overall_num_list = []
+    celossfunc = torch.nn.NLLLoss()
+    with open(test_result_file, 'w') as writer:
+        # train model using training data
+        for ori_data, A, ori_mean_xy, ori_map_data, lane_label, ori_trajectory, seq_id_city  in tqdm(pra_data_loader):
+            # data: (N, C, T, V)
+            # C = 11: [frame_id, object_id, object_type, position_x, position_y, position_z, object_length, pbject_width, pbject_height, heading] + [mask]
+            # max_xy = torch.max(torch.max(torch.max(torch.abs(ori_data[:,3:5]), dim=2)[0], dim=-1)[0], dim=0)[0]
+            # rescale_xy[:,:,0,0] = max_xy
+            data, no_norm_loc_data, _ = preprocess_data(ori_data, rescale_xy)
+            map_data, _, _, = preprocess_data(ori_map_data, rescale_xy)
+            trajectory, no_norm_trajectory, _, = preprocess_data(ori_trajectory, rescale_xy, [1,2,3,4])
+            lane_label = torch.argmax(lane_label, dim=1).long().to(dev)
+
+            now_history_frames = history_frames
+            input_data = data[:,:,:now_history_frames,:] # (N, C, T, V)=(N, 4, 6, 120)
+            output_loc_GT = data[:,:2,now_history_frames:,:] # (N, C, T, V)=(N, 2, 6, 120)
+            output_mask = data[:,-1:,now_history_frames:,:] # (N, C, T, V)=(N, 1, 6, 120)
+
+            ori_output_loc_GT = no_norm_loc_data[:,:2,now_history_frames:,:]
+            ori_history_output_loc_GT = no_norm_loc_data[:,:2,:now_history_frames,:]
+            ori_output_last_loc = no_norm_loc_data[:,:2,now_history_frames-1:now_history_frames,:1]
+            input_trajectory = trajectory[:,:,:now_history_frames,:]
+            output_trajectory_GT = trajectory[:,:2,now_history_frames:,:] # (N, C, T, V)=(N, 2, 6, 120)
+            output_mask = trajectory[:,-1:,now_history_frames:,:] # (N, C, T, V)=(N, 1, 6, 120)
+
+            A = A.float().to(dev)
+            predicted, att = pra_model(pra_x=input_trajectory, pra_map=trajectory, pra_A=A, pra_pred_length=config.future_frames) #, pra_teacher_forcing_ratio=0, pra_teacher_location=output_loc_GT (N, C, T, V)=(N, 2, 6, 120)
             ########################################################
             # Compute details for training
             ########################################################
@@ -480,7 +593,6 @@ def val_model(pra_model, pra_data_loader):
             ori_lane_id = ori_trajectory[:,0]
             
             predicted = predicted * rescale_xy
-            ori_output_loc_GT = ori_output_loc_GT
             if config.vel_mode:
                 for ind in range(1, predicted.shape[-2]):
                     predicted[:,:,ind] = torch.sum(predicted[:,:,ind-1:ind+1], dim=-2)
@@ -493,103 +605,28 @@ def val_model(pra_model, pra_data_loader):
             ori_lane_id: [N, T, V]
             """
 
-            now_pred = get_xy_trajectory(predicted, ori_mean_xy, seq_id_city, ori_lane_id, now_history_frames)
-
-            argmax_att = torch.argmax(att, dim=-1).unsqueeze(-1).unsqueeze(-1).unsqueeze(-1)
-            ori_output_loc_GT = ori_output_loc_GT.gather(dim=-1, index=argmax_att.repeat((1, ori_output_loc_GT.shape[1], ori_output_loc_GT.shape[2], 1)))
-
-            overall_sum_time, overall_num, x2y2 = compute_RMSE(now_pred[:,:,:,0:1], ori_output_loc_GT[:,:,:,0:1], output_mask[:,:,:,0:1])       
-            now_x2y2 = x2y2.detach().cpu().numpy()
-            now_x2y2 = now_x2y2.sum(axis=-1)
-            overall_num = overall_num.detach().cpu().numpy()
-            
-            all_overall_num_list.extend(overall_num)
-            all_overall_sum_list.extend(now_x2y2)
-
-            now_pred = now_pred.detach().cpu().numpy() # (N, C, T, V)=(N, 2, 6, 120)
-            now_ori_data = ori_data.detach().cpu().numpy() # (N, C, T, V)=(N, 11, 6, 120)
-            now_map_data = ori_map_data.detach().cpu().numpy()
-            now_att = att.detach().cpu().numpy()
-            if config.view:
-                visulize(now_pred[:,:,:,0:1], now_ori_data[:, :5, :, 0:1], now_ori_data[:, -1:, -1:, 0:1], now_map_data[:, 3:5], now_att, lane_label)
-
-    all_overall_sum_list = np.array(all_overall_sum_list)
-    all_overall_num_list = np.array(all_overall_num_list)
-    return all_overall_sum_list, all_overall_num_list
-
-
-
-def test_model(pra_model, pra_data_loader):
-    # pra_model.to(dev)
-    pra_model.eval()
-    rescale_xy = torch.ones((1,2,1,1)).to(dev)
-    rescale_xy[:,0] = max_x
-    rescale_xy[:,1] = max_y
-    all_overall_sum_list = []
-    all_overall_num_list = []
-    celossfunc = torch.nn.NLLLoss()
-    with open(test_result_file, 'w') as writer:
-        # train model using training data
-        for ori_data, A, _, ori_map_data, lane_label, ori_trajectory,  in tqdm(pra_data_loader):
-            # data: (N, C, T, V)
-            # C = 11: [frame_id, object_id, object_type, position_x, position_y, position_z, object_length, pbject_width, pbject_height, heading] + [mask]
-            # max_xy = torch.max(torch.max(torch.max(torch.abs(ori_data[:,3:5]), dim=2)[0], dim=-1)[0], dim=0)[0]
-            # rescale_xy[:,:,0,0] = max_xy
-            data, no_norm_loc_data, _ = preprocess_data(ori_data, rescale_xy)
-            map_data, _, _, = preprocess_data(ori_map_data, rescale_xy)
-            lane_label = torch.argmax(lane_label, dim=1).long().to(dev)
-            input_data = data[:,:,:history_frames,:] # (N, C, T, V)=(N, 4, 6, 120)
-            output_mask = data[:,-1:,history_frames:,:] # (N, V)=(N, 120)
-            # print(data.shape, A.shape, mean_xy.shape, input_data.shape)
-
-            ori_output_loc_GT = no_norm_loc_data[:,:2,history_frames:,:]
-            ori_output_last_loc = no_norm_loc_data[:,:2,history_frames-1:history_frames,:1]
-        
-            A = A.float().to(dev)
-            # time1 = time.clock()
-            predicted, att = pra_model(pra_x=input_data, pra_map=map_data, pra_A=A, pra_pred_length=future_frames) #, pra_teacher_forcing_ratio=0, pra_teacher_location=None (N, C, T, V)=(N, 2, 6, 120)
-            # time2 = time.clock()
-            # print(time2 - time1)
-            predicted = predicted *rescale_xy 
-            if config.vel_mode:
-                for ind in range(1, predicted.shape[-2]):
-                    predicted[:,:,ind] = torch.sum(predicted[:,:,ind-1:ind+1], dim=-2)
-                predicted += ori_output_last_loc
-            # celoss = celossfunc(torch.log(att[:,0]), lane_label)
-
-            now_pred = predicted.detach().cpu().numpy() # (N, C, T, V)=(N, 2, 6, 120)
-            # now_mean_xy = mean_xy.detach().cpu().numpy() # (N, 2)
-            now_ori_data = ori_data.detach().cpu().numpy() # (N, C, T, V)=(N, 11, 6, 120)
-            now_ori_output_loc_GT = ori_output_loc_GT.detach().cpu().numpy()
-            now_output_mask = output_mask.detach().cpu().numpy()
-
-            ### overall dist
-            # overall_sum_time, overall_num, x2y2 = compute_RMSE(predicted, output_loc_GT, output_mask)        
-            overall_sum_time, overall_num, x2y2 = compute_RMSE(predicted[:,:,:,0:1], ori_output_loc_GT[:,:,:,0:1], output_mask[:,:,:,0:1])        
-            # all_overall_sum_list.extend(overall_sum_time.detach().cpu().numpy())
-            all_overall_num_list.extend(overall_num.detach().cpu().numpy())
-            # x2y2 (N, 6, 39)
-            now_x2y2 = x2y2.detach().cpu().numpy()
-            now_x2y2 = now_x2y2.sum(axis=-1)
-            # all_overall_sum_list.extend(now_x2y2)
-
-            # now_mask = now_ori_data[:, -1, history_frames - 1, :] # (N, V)
-            
-            distance_error = (np.sum(((now_pred[:,:,:,0] - now_ori_output_loc_GT[:,:,:,0])*now_output_mask[:,:,:,0]) ** 2, axis=1) ** 0.5)
-            all_overall_sum_list.extend(distance_error)
-
-            now_map_data = ori_map_data.detach().cpu().numpy()
-            now_att = att.detach().cpu().numpy()
-            # visulize(now_pred[:,:,:,0:1], now_ori_data[:, :5, :, 0:1], now_ori_data[:, -1:, -1:, 0:1], now_map_data[:, 3:5], now_att)
-
-    all_overall_sum_list = np.array(all_overall_sum_list)
-    all_overall_num_list = np.array(all_overall_num_list)
-    all_over_loss = display_result(
-        [all_overall_sum_list, all_overall_num_list], 
-        pra_pref='{}_{}'.format('Test', test_data_file), 
-        pra_error_order=1
-        )
-    return all_over_loss
+            ori_future_lane_id = get_lane_id(predicted, ori_lane_id, seq_id_city) # (N, K, L) K lane graphs，with L lanes
+            for now_pred, now_seq_id_city, now_lane_id, now_future_lane_id, now_output_loc_GT in zip(predicted, seq_id_city, ori_lane_id, ori_future_lane_id, ori_output_loc_GT):
+                now_output_loc_GT = now_output_loc_GT[:,:,0].permute((1,0)).detach().cpu().numpy()
+                now_seq_id = now_seq_id_city[0].long().item()
+                now_city = now_seq_id_city[1].long().item()
+                now_city = "PIT" if now_city == 0 else "MIA"
+                pred_trajectory = []
+                if len(now_future_lane_id) > 0 :
+                    for future_lane_id in now_future_lane_id:
+                        now_pred_trajectory = get_xy_trajectory(now_pred, torch.tensor([0,0]), now_seq_id_city, now_lane_id, now_history_frames, future_lane_id)
+                        now_pred_trajectory = now_pred_trajectory[:,:,0].permute((1,0)).detach().cpu().numpy()
+                        pred_trajectory.append(now_pred_trajectory)
+                else:
+                    now_pred_trajectory = get_xy_trajectory(now_pred, torch.tensor([0,0]), now_seq_id_city, now_lane_id, now_history_frames)
+                    now_pred_trajectory = now_pred_trajectory[:,:,0].permute((1,0)).detach().cpu().numpy()
+                    pred_trajectory.append(now_pred_trajectory)
+                zero_pred = np.zeros((config.future_frames, 2))
+                while len(pred_trajectory) < config.sample_times:
+                    pred_trajectory.append(zero_pred)
+                all_pred_trajectory[now_seq_id] = pred_trajectory
+                all_city[now_seq_id] = now_city
+                all_gt_trajectory = now_output_loc_GT
     # return all_overall_sum_list, all_overall_num_list
 
 
@@ -602,7 +639,7 @@ def run_trainval(pra_model, pra_traindata_path, pra_testdata_path):
     pre_loss = float("inf")
     best_epoch = 0
     train_data_files = sorted([os.path.join(pra_traindata_path, f) for f in os.listdir(pra_traindata_path) if f.split(".")[-1] == "pkl"])
-    train_data_files = train_data_files[:1]
+    # train_data_files = train_data_files[:1]
     for now_epoch in range(total_epoch):
         total_train_loss = 0
         total_val_loss = 0
@@ -668,25 +705,31 @@ def run_val(pra_model, pra_data_path):
     my_print(overall_log)
 
 
-def run_test(pra_model, pra_data_path):
+def run_test(pra_model, pra_data_path, save_result=True):
     my_print("test_data_file: [%s]"%pra_data_path)
     pra_model.eval()
     test_data_files = sorted([os.path.join(pra_data_path, f) for f in os.listdir(pra_data_path) if f.split(".")[-1] == "pkl"])
-    total_test_loss = 0
     # test_data_files = test_data_files[:1]
+    num_files = len(test_data_files)
+    all_gt_trajectory = {}
+    all_pred_trajectory = {}
+    all_city = {}
     for idx, test_data_file in enumerate(test_data_files):
-        my_print('#######################################Test_%02d/%02d'%(idx+1, len(test_data_files)))
+        my_print('#######################################test_%02d/%02d'%(idx+1, num_files))
+        print("test data file: [%s]"%test_data_file)
         loader_test = data_loader(test_data_file, pra_batch_size=batch_size_test, pra_shuffle=False, pra_drop_last=False, train_val_test='test')
-        # overall_loss_time = display_result(
-        #     test_model(pra_model, loader_test), 
-        #     pra_pref='{}_Epoch{}'.format('Test', now_epoch)
-        #     )
-        overall_loss_time = test_model(pra_model, loader_test)
-        total_test_loss += overall_loss_time
-    total_test_loss /= (len(test_data_files))
-    pra_pref='{}_{}'.format('Test', "overall")
-    overall_log = '|{}|[{}] All_All: {}'.format(datetime.now(), pra_pref, ' '.join(['{:.3f}'.format(x) for x in list(total_test_loss) + [np.mean(total_test_loss)]]))
-    my_print(overall_log)
+        test_model(pra_model, loader_test, all_pred_trajectory, all_gt_trajectory, all_city)
+    try:
+        result = eval_forecasting.compute_forecasting_metrics(all_pred_trajectory, all_gt_trajectory, all_city, config.sample_times, future_frames, 2)
+        my_print(result)
+    except:
+        pass
+    if save_result:
+        output_path = config.pretrained_model_path.replace("trained_models", "result")
+        if not os.path.exists(output_path):
+            os.makedirs(output_path)
+        # all_pred_trajectory = np.array(all_pred_trajectory)
+        generate_forecasting_h5(all_pred_trajectory, output_path)
 
 
 
@@ -735,8 +778,9 @@ if __name__ == '__main__':
             # train_data_file = os.path.join(data_root, train_data_path, train_data_file)
         run_trainval(model, pra_traindata_path=train_data_path, pra_testdata_path=test_data_file)
     else:
-        run_val(model, val_data_path)
+        # run_val(model, val_data_path)
         # run_test(model, val_data_path)
+        run_test(model, test_data_path)
     
         
         
