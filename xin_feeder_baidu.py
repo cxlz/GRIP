@@ -13,6 +13,7 @@ from torchvision import datasets, transforms
 # from data_process import generate_data
 
 from layers.graph import Graph
+import config.configure as config
 
 import time
 
@@ -116,7 +117,7 @@ class Feeder(torch.utils.data.Dataset):
             now_seq_id_city[1] = 1
         now_seq_id_city = now_seq_id_city.astype("float")
         
-        return now_feature, now_A, now_mean_xy, now_map_feature, now_lane_label, now_trajectory, now_seq_id_city
+        return now_feature[:,::config.frame_steps], now_A, now_mean_xy, now_map_feature, now_lane_label, now_trajectory[:,::config.frame_steps], now_seq_id_city
 
 
 

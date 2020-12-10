@@ -37,11 +37,12 @@ class data_process_grip:
             obs_type = feature_curr[2]
             if obs_type == "AV" or obs_type == "AGENT":
                 if obs_type == "AV":
-                    AV_id = obs_id
-                    continue
+                    AV_ID = obs_id
+                    obs_type = 0
                 else:
                     AGENT_ID = obs_id
                     obs_type = 1
+                    continue
             else:
                 continue
                 obs_type = 5
@@ -67,7 +68,7 @@ class data_process_grip:
         self.prediction_data_list = sorted(sorted(self.prediction_data_list, key=lambda x: x[1]), key=lambda x: x[0])
         txt_file = os.path.join(self.save_path, "%05d_train_data_%s.txt"%(self.prediction_data_count, file))
         self.prediction_data_list = np.array(self.prediction_data_list)
-        idx = self.prediction_data_list[:, 1] == str(AGENT_ID)
+        idx = self.prediction_data_list[:, 1] == str(AV_ID)
         now = self.prediction_data_list[idx]
         
         distance = np.sqrt(np.square(float(now[0][3]) - float(now[19][3])) + np.square(float(now[0][4]) - float(now[19][4])))
@@ -86,9 +87,9 @@ class data_process_grip:
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("-d", "--data_dir", type=str, default="/datastore/data/cxl/argoverse/val/data/", required=False, help="data load dir")
-    parser.add_argument("-s", "--save_dir", type=str, default="/datastore/data/cxl/GRIP/data/argo/all/prediction_val/raw_data", required=False, help="data save dir")
-    parser.add_argument("-n", "--num", type=int, default=1000, required=False, help="num of files to load")
+    parser.add_argument("-d", "--data_dir", type=str, default="/datastore/data/cxl/argoverse/train/data/", required=False, help="data load dir")
+    parser.add_argument("-s", "--save_dir", type=str, default="/datastore/data/cxl/GRIP/data/argo/all/prediction_train/raw_data_AV", required=False, help="data save dir")
+    parser.add_argument("-n", "--num", type=int, default=10000, required=False, help="num of files to load")
     args = parser.parse_args()
     # DATA_DIR = 'data/argo/forecasting_sample/data/'
     # nameList = ['2645.csv','3700.csv','3828.csv','3861.csv']

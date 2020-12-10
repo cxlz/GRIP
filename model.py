@@ -94,13 +94,8 @@ class Model(nn.Module):
 
     def forward(self, pra_x:torch.Tensor, pra_map:torch.Tensor, pra_A:torch.Tensor, pra_pred_length:int=6): #, pra_teacher_forcing_ratio:int=0, pra_teacher_location=torch.zeros(1)
         x = pra_x # (N, 4, 6, 120)
-        
-        # forwad
-        # for network in self.conv_networks:
-        #     x = network(x)
+        mask = x[:,-1,0] == 1
 
-        # mask = mask.unsqueeze(1).float()
-        # mask = mask.unsqueeze(-1)
         x = self.conv_network(x)
         for gcn in self.st_gcn_networks:
             # importance = self.edge_importance[ii]
@@ -109,44 +104,31 @@ class Model(nn.Module):
             # else:
             # x, _ = gcn(x, pra_A + importance)
             x, _ = gcn(x, pra_A)
-
-
-        # N, C, T, V = x.shape
-        # mN, mC, mT, mV = mx.shape
-        # P, now_att = self.attention(x, mx, mask)
-
-        # now_att = now_att.view(N, V, T, mV, mT)
-        # now_att = torch.mean(now_att, dim=[2,4])
-        # x = torch.cat((x, P), dim=1)
-        # x = x + P
                 
         # prepare for seq2seq lstm model
         graph_conv_feature = self.reshape_for_lstm(x)
         last_position = self.reshape_for_lstm(pra_x[:,:2]) #(N, C, T, V)[:, :2] -> (N, T, V*2) [(N*V, T, 2)]
-        # graph_conv_feature = x[:,:,:,0].permute(0,2,1)
-        # last_position = pra_x[:,:2,:,0].permute(0,2,1)
-        # if pra_teacher_forcing_ratio>0 and pra_teacher_location.dim() > 1: #
-        #     pra_teacher_location = self.reshape_for_lstm(pra_teacher_location)
+
         if config.use_map:
             mx = pra_map
-            mask = mx[:, -1, 0] == 1
+            map_mask = mx[:, -1, 0] == 1
             mx = self.map_conv_network(mx)
             for gcn in self.map_gcn_networks:
                 mx, _ = gcn(mx)
             graph_conv_map_feature = self.reshape_for_lstm(mx)
         else:
             graph_conv_map_feature = torch.Tensor()
-            mask = torch.Tensor()
+            map_mask = torch.Tensor()
 
         # now_predict.shape = (N, T, V*C)
         self.num_node = x.shape[-1]
-        now_predict_car, now_att_car = self.seq2seq_car(in_data=graph_conv_feature, last_location=last_position[:,-1:,:], map_data=graph_conv_map_feature, pred_length=pra_pred_length, map_mask=mask) #, teacher_forcing_ratio=pra_teacher_forcing_ratio, teacher_location=pra_teacher_location
+        now_predict_car, now_att_car = self.seq2seq_car(in_data=graph_conv_feature, last_location=last_position[:,-1:,:], map_data=graph_conv_map_feature, pred_length=pra_pred_length, mask=mask, map_mask=map_mask) #, teacher_forcing_ratio=pra_teacher_forcing_ratio, teacher_location=pra_teacher_location
         # now_predict_car = self.reshape_from_lstm(now_predict_car) # (N, C, T, V)
 
-        now_predict_human, now_att_human = self.seq2seq_human(in_data=graph_conv_feature, last_location=last_position[:,-1:,:], map_data=graph_conv_map_feature, pred_length=pra_pred_length, map_mask=mask) #, teacher_forcing_ratio=pra_teacher_forcing_ratio, teacher_location=pra_teacher_location
+        now_predict_human, now_att_human = self.seq2seq_human(in_data=graph_conv_feature, last_location=last_position[:,-1:,:], map_data=graph_conv_map_feature, pred_length=pra_pred_length, mask=mask, map_mask=map_mask) #, teacher_forcing_ratio=pra_teacher_forcing_ratio, teacher_location=pra_teacher_location
         # now_predict_human = self.reshape_from_lstm(now_predict_human) # (N, C, T, V)
 
-        now_predict_bike, now_att_bike = self.seq2seq_bike(in_data=graph_conv_feature, last_location=last_position[:,-1:,:], map_data=graph_conv_map_feature, pred_length=pra_pred_length, map_mask=mask) #, teacher_forcing_ratio=pra_teacher_forcing_ratio, teacher_location=pra_teacher_location
+        now_predict_bike, now_att_bike = self.seq2seq_bike(in_data=graph_conv_feature, last_location=last_position[:,-1:,:], map_data=graph_conv_map_feature, pred_length=pra_pred_length, mask=mask, map_mask=map_mask) #, teacher_forcing_ratio=pra_teacher_forcing_ratio, teacher_location=pra_teacher_location
         # now_predict_bike = self.reshape_from_lstm(now_predict_bike) # (N, C, T, V)
 
         now_predict = (now_predict_car + now_predict_human + now_predict_bike)/3.

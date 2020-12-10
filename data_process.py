@@ -145,43 +145,47 @@ def process_trajectory_data(id, city, now_traj_sl:list, trajectory_sl_list:list,
     s = 0
     l = 0
     idx = ori_idx
+    # if lane_id == 9609285:
+    #     print(lane_id)
     while idx < trajectory.shape[0]:
         if trajectory[idx][-1] == 0:
             now_traj_sl.append([0,0,0,0,0])
             idx += 1 
             continue
         s, l = centerline_utils.get_normal_and_tangential_distance_point(trajectory[idx][0], trajectory[idx][1], segment) 
-        p = lane_string.interpolate(s);
         if s < lane_length:# and s > 0
             now_traj_sl.append([lane_id, s + accumulated_s, l, turn, 1])
             idx += 1
         else:
             break
-    if s == 0 and (idx > 1 and now_traj_sl[-1][1] <= now_traj_sl[-2][1]):
-        now_traj_sl = now_traj_sl[:ori_idx]
+    # 跳过反向车道
+    if s == 0 and (idx - ori_idx > 1 and now_traj_sl[-1][1] <= now_traj_sl[-2][1]):
+        for l in range(ori_idx, len(now_traj_sl)):
+            now_traj_sl.pop()
         return
-    accumulated_s += lane_length
+    if idx > ori_idx:
+        accumulated_s += lane_length
     if idx >= trajectory.shape[0]:
         tmp = np.array(now_traj_sl, dtype="float")
         if len(trajectory_sl_list) == 0 or not np.any([np.array_equal(tmp[:,0], traj[:,0]) for traj in trajectory_sl_list]):
             trajectory_sl_list.append(tmp)
-    else:
-        if not lane.successors is None and deepth < 100:
+    elif len(now_traj_sl) > 0:
+        if not lane.successors is None and deepth < 10:
             deepth += 1
-            # cur_idx = len(now_traj_sl)
             for s_id in lane.successors:
-                # now_traj_sl = now_traj_sl[0:cur_idx]
                 process_trajectory_data(s_id, city, now_traj_sl, trajectory_sl_list, trajectory, accumulated_s, deepth)
-        else:
-            while len(now_traj_sl) < trajectory.shape[0]:
-                now_traj_sl.append([0,0,0,0,0])
-            tmp = np.array(now_traj_sl, dtype="float")
-            if len(trajectory_sl_list) == 0 or not np.any([np.array_equal(tmp[:,0], traj[:,0]) for traj in trajectory_sl_list]):
-                trajectory_sl_list.append(tmp)
-    accumulated_s -= lane_length
+        # else:
+        #     while len(now_traj_sl) < trajectory.shape[0]:
+        #         now_traj_sl.append([0,0,0,0,0])
+        #     tmp = np.array(now_traj_sl, dtype="float")
+        #     if len(trajectory_sl_list) == 0 or not np.any([np.array_equal(tmp[:,0], traj[:,0]) for traj in trajectory_sl_list]):
+        #         trajectory_sl_list.append(tmp)
+
+    if idx > ori_idx:
+        accumulated_s -= lane_length
     # tmp = now_traj_sl[0:ori_idx]
-    for l in range(ori_idx, len(now_traj_sl)):
-        now_traj_sl.pop()
+        for l in range(ori_idx, len(now_traj_sl)):
+            now_traj_sl.pop()
     # now_traj_sl = now_traj_sl[0:ori_idx]
     return
 
@@ -232,7 +236,7 @@ def process_map_data(center, trajectory, search_radius, point_num, mean_xy, city
             nearby_lane_objs = [avm.city_lane_centerlines_dict[city][lane_id] for lane_id in idList]
             per_lane_dists, min_dist_nn_indices, _ = centerline_utils.lane_waypt_to_query_dist(center, nearby_lane_objs)
 
-            curr_lane_ids = idList[per_lane_dists < 2]
+            curr_lane_ids = idList[per_lane_dists < 5]
             nearest_lane = idList[min_dist_nn_indices[0]]
             if nearest_lane not in curr_lane_ids:
                 curr_lane_ids = np.append(curr_lane_ids, nearest_lane)
@@ -259,7 +263,7 @@ def process_map_data(center, trajectory, search_radius, point_num, mean_xy, city
         for ln, id in enumerate(idList):
             # print(id)
             now_traj_sl = []
-            process_trajectory_data(id, city, now_traj_sl, trajectory_sl_list, trajectory)
+            process_trajectory_data(id, city, now_traj_sl, trajectory_sl_list, trajectory, 0, 0)
 
         trajectory_sl_list = np.array(trajectory_sl_list, dtype="float")
 
@@ -343,11 +347,14 @@ def process_data(pra_now_dict, pra_start_ind, pra_end_ind, pra_observed_last, fr
 
     object_frame_feature = np.zeros((max_num_object, round((pra_end_ind-pra_start_ind) / frame_steps), total_feature_dimension))
     map_frame_feature = np.zeros((max_num_map, config.segment_point_num, total_feature_dimension))
-    trajectory_frame_feature = np.zeros((max_num_map, total_frames, 5))
+    trajectory_frame_feature = np.zeros((max_num_map, object_feature_list.shape[0], 5))
     curr_lane_label = np.zeros(max_num_map)
     try:
         mean_lane_l = np.mean(np.abs(trajectory_sl_list[:, :, 2]), axis=1)
+        # curr_lane_l = np.abs(trajectory_sl_list[:,history_frames -1, 2])
+        # lane_l = np.concatenate((curr_lane_l, mean_lane_l)
         sorted_lane_idx = np.argsort(mean_lane_l, axis=0)
+        sorted_lane_idx = sorted_lane_idx[:min(max_num_map, len(sorted_lane_idx))]
         map_feature_list = map_feature_list[sorted_lane_idx]
         trajectory_sl_list = trajectory_sl_list[sorted_lane_idx]
         curr_lane_label[0] = 1
@@ -356,7 +363,7 @@ def process_data(pra_now_dict, pra_start_ind, pra_end_ind, pra_observed_last, fr
         map_frame_feature[:map_feature_list.shape[0]] = map_feature_list
         trajectory_frame_feature[:trajectory_sl_list.shape[0]] = trajectory_sl_list    
     except:
-        aaaa = 1
+        print(trajectory_sl_list)
     
     # np.transpose(object_feature_list, (1,0,2))
     object_frame_feature[:num_visible_object+num_non_visible_object] = np.transpose(object_feature_list, (1,0,2))
@@ -436,7 +443,7 @@ def generate_test_data(pra_file_path):
     start_frame_id_list = frame_id_set[::history_frames]
     for start_ind in start_frame_id_list:
         start_ind = int(start_ind)
-        end_ind = int(start_ind + history_frames)
+        end_ind = min(int(start_ind + history_frames), len(frame_id_set))
         observed_last = start_ind + history_frames - 1
         # print(start_ind, end_ind)
         for ind in range(start_ind, end_ind):
@@ -510,9 +517,9 @@ def generate_data(pra_file_path_list, pra_is_train=True, save_data=True, idx=-1)
         if pra_is_train == "train":
             save_path = os.path.join(data_root, train_data_path, "%02d_sl_"%idx + config.train_data_file)
         elif pra_is_train == "val":
-            save_path = os.path.join(data_root, val_data_path, "%02d_sl_"%idx + config.val_data_file)
+            save_path = os.path.join(data_root, val_data_path,   "%02d_sl_"%idx + config.val_data_file)
         elif pra_is_train == "test":
-            save_path = os.path.join(data_root, test_data_path, "%02d_sl_"%idx + config.test_data_file)
+            save_path = os.path.join(data_root, test_data_path,  "%02d_sl_"%idx + config.test_data_file)
 
         print("saving %s data: [%s]"%(pra_is_train, save_path))
 
@@ -530,37 +537,39 @@ if __name__ == '__main__':
     # train_data_path = "prediction_train/"
     train_data_path_list = sorted(glob.glob(os.path.join(data_root, train_data_path + "/raw_data", '*.txt')), key=lambda x: int(x.split(".")[-2].split("_")[-1]))
     val_data_path_list   = sorted(glob.glob(os.path.join(data_root, val_data_path   + "/raw_data", '*.txt')), key=lambda x: int(x.split(".")[-2].split("_")[-1]))
-    # test_data_path_list  = sorted(glob.glob(os.path.join(data_root, test_data_path  + "/raw_data", '*.txt')), key=lambda x: int(x.split(".")[-2].split("_")[-1]))
-    train_data_size = 10000
-    val_data_size   = 1000
+    test_data_path_list  = sorted(glob.glob(os.path.join(data_root, test_data_path  + "/raw_data", '*.txt')), key=lambda x: int(x.split(".")[-2].split("_")[-1]))
+    train_data_size = 5000
+    val_data_size   = 2000
     test_data_size  = 5000
 
-    train_data_length = len(train_data_path_list) // train_data_size
-    if len(train_data_path_list) % train_data_size != 0:
-        train_data_length += 1 
-    for idx in range(0,train_data_length):#
-        print('Generating Training Data_%02d/%02d'%(idx+1, train_data_length))
-        start_index = idx * train_data_size
-        end_index = min((idx + 1) * train_data_size, len(train_data_path_list))
-        generate_data(train_data_path_list[start_index:end_index], pra_is_train="train", idx=idx)
+    print("train data root: %s"%data_root)
+    
+    # train_data_length = len(train_data_path_list) // train_data_size
+    # if len(train_data_path_list) % train_data_size != 0:
+    #     train_data_length += 1 
+    # for idx in range(0,train_data_length):#
+    #     print('Generating Training Data_%02d/%02d'%(idx+1, train_data_length))
+    #     start_index = idx * train_data_size
+    #     end_index = min((idx + 1) * train_data_size, len(train_data_path_list))
+    #     generate_data(train_data_path_list[start_index:end_index], pra_is_train="train", idx=idx)
 
-    val_data_length = len(val_data_path_list) // val_data_size
-    if len(val_data_path_list) % val_data_size != 0:
-        val_data_length += 1 
-    for idx in range(val_data_length):#
-        print('Generating Validate Data_%02d/%02d'%(idx+1, val_data_length))
-        start_index = idx * val_data_size
-        end_index = min((idx + 1) * val_data_size, len(val_data_path_list))
-        generate_data(val_data_path_list[start_index:end_index], pra_is_train="val", idx=idx)
+    # val_data_length = len(val_data_path_list) // val_data_size
+    # if len(val_data_path_list) % val_data_size != 0:
+    #     val_data_length += 1 
+    # for idx in range(val_data_length):#
+    #     print('Generating Validate Data_%02d/%02d'%(idx+1, val_data_length))
+    #     start_index = idx * val_data_size
+    #     end_index = min((idx + 1) * val_data_size, len(val_data_path_list))
+    #     generate_data(val_data_path_list[start_index:end_index], pra_is_train="val", idx=idx)
 
-    # test_data_length = len(test_data_path_list) // test_data_size
-    # if len(test_data_path_list) % test_data_size != 0:
-    #     test_data_length += 1 
-    # for idx in range(test_data_length):#
-    #     print('Generating Testing Data_%02d/%02d'%(idx+1, test_data_length))
-    #     start_index = idx * test_data_size
-    #     end_index = min((idx + 1) * test_data_size, len(test_data_path_list))
-    #     generate_data(test_data_path_list[start_index:end_index], pra_is_train="test", idx=idx)
+    test_data_length = len(test_data_path_list) // test_data_size
+    if len(test_data_path_list) % test_data_size != 0:
+        test_data_length += 1 
+    for idx in range(test_data_length):#
+        print('Generating Testing Data_%02d/%02d'%(idx+1, test_data_length))
+        start_index = idx * test_data_size
+        end_index = min((idx + 1) * test_data_size, len(test_data_path_list))
+        generate_data(test_data_path_list[start_index:end_index], pra_is_train="test", idx=idx)
   
 
 
