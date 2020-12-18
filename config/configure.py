@@ -33,7 +33,7 @@ test_data_path = "prediction_test/"
 train_data_file = 'train_data_%d_%d_%d_%d.pkl'%(frame_steps, history_frames, future_frames, lane_search_radius)
 test_data_file = 'test_data_%d_%d_%d_%d.pkl'%(frame_steps, history_frames, future_frames, lane_search_radius)
 val_data_file = 'val_data_%d_%d_%d_%d.pkl'%(frame_steps, history_frames, future_frames, lane_search_radius)
-save_model_prefix = "model_argo_all_sl_vel_"
+save_model_prefix = "model_argo_all_sl_mul_pos_"
 
 
 
@@ -58,16 +58,16 @@ loss_weight = [1, 1, 1]
 
 train = False
 load_model = False
-vel_mode = True
+vel_mode = False
 use_map = False
-use_celoss = False
+use_celoss = True
 use_history = False
-multi_lane = False
+multi_lane = True
 convert_model = False
 
-pretrained_model_path = '/datastore/data/cxl/GRIP/trained_models/argo/all_data/model_argo_all_sl_vel_1211_01:19:24_epoch_0024.pt'
+pretrained_model_path = '/datastore/data/cxl/GRIP/trained_models/argo/all_data/model_argo_all_sl_mul_pos_1214_16:19:37_epoch_0024.pt'
 view = True 
-save_view = False
+save_view = True
 save_view_path = os.path.join(work_dir, "view", pretrained_model_path.split(".")[0].split("/")[-1])
 if not train and not os.path.exists(save_view_path):
     os.makedirs(save_view_path)

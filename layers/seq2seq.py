@@ -60,6 +60,7 @@ class Seq2Seq(nn.Module):
         self.encoder = EncoderRNN(input_size, hidden_size, num_layers, isCuda)
         self.decoder = DecoderRNN(hidden_size, hidden_size, num_layers, dropout, isCuda)
         self.encoder_map = EncoderRNN(input_size, hidden_size, num_layers, isCuda)
+        self.attention = Attention(hidden_size*30)
         self.maxpool = nn.MaxPool1d(hidden_size*30)
         self.dropout = nn.Dropout(p=dropout)
         self.linear = nn.Linear(hidden_size*30, hidden_size)
@@ -71,9 +72,8 @@ class Seq2Seq(nn.Module):
         batch_size = in_data.shape[0] // config.max_num_map
         out_dim = self.decoder.output_size
         history_frames = in_data.shape[1]
-        self.pred_length = pred_length
 
-        outputs = torch.zeros(batch_size, self.pred_length + history_frames, out_dim)
+        outputs = torch.zeros(in_data.shape[0], pred_length + history_frames, out_dim)
         # hidden = torch.zeros(self.encoder.lstm.num_layers, batch_size, self.encoder.lstm.hidden_size)
         if self.isCuda:
             outputs = outputs.cuda()    
@@ -81,20 +81,11 @@ class Seq2Seq(nn.Module):
             #    
         encoded_output, hidden = self.encoder(in_data) #in_data (NV, T, C) -->encoded_output (NV, T, H) hidden (L, NV, H)
         if self.training:
-            encoded_output = encoded_output.reshape((batch_size, -1, encoded_output.shape[-2], encoded_output.shape[-1]))[:,0]
+            # encoded_output = encoded_output.reshape((batch_size, -1, encoded_output.shape[-2], encoded_output.shape[-1]))[:,0]
             history_out = self.dropout(encoded_output)
             history_out = self.linear(history_out)
             outputs[:, :history_frames] = history_out
 
-
-
-        # N, V, mV = att.shape
-        # argmax_att = torch.argmax(att, dim=-1)
-        # for i in range(N):
-        #     iv = i * V
-        #     imv = i * mV
-        #     for j in range(V):
-        #         hidden[:, iv + j] = hidden[:, iv + j] + map_hidden[:, imv + argmax_att[i, j]]
         if config.use_map:
             map_encoded_output, map_hidden = self.encoder(map_data) #map_data (NmV, mT, C) --> map_hidden (L, NmV, H)
             map_hidden, att = self.attention(hidden, map_hidden, map_mask) #map_hidden (L, N, H) , att (N, mV)
@@ -102,16 +93,17 @@ class Seq2Seq(nn.Module):
             # hidden = torch.cat((hidden, map_hidden), dim=-1)
             hidden = torch.tanh(hidden)
         else:
-            hidden = hidden.view((hidden.shape[0], batch_size, -1, hidden.shape[-1])).contiguous() #(L, N, V, H)
-            last_location = last_location.view(batch_size, -1, last_location.shape[-2], last_location.shape[-1]).contiguous()
+            curr_hidden = hidden.view((hidden.shape[0], batch_size, -1, hidden.shape[-1])).contiguous() #(L, N, V, H)
+            # last_location = last_location.view(batch_size, -1, last_location.shape[-2], last_location.shape[-1]).contiguous()
             if config.multi_lane:
-                max_hidden = self.maxpool(hidden[-1]).squeeze(-1) #(N, V)
-                zero_tensor = torch.ones_like(max_hidden) * -1e1
-                max_hidden = torch.where(mask, max_hidden, zero_tensor)
-                att = torch.softmax(max_hidden, dim=1) #(N)
-                argmax_att = torch.argmax(att, dim=-1)
-                hidden = hidden.gather(dim=2, index=argmax_att.unsqueeze(0).unsqueeze(-1).unsqueeze(-1).repeat((hidden.shape[0], 1, 1, hidden.shape[-1]))).squeeze(-2) #(L, N, H)
-                last_location = last_location.gather(dim=1, index=argmax_att.unsqueeze(-1).unsqueeze(-1).unsqueeze(-1).repeat((1, 1, last_location.shape[-2], last_location.shape[-1]))).squeeze(1)
+                _, att = self.attention(curr_hidden, curr_hidden, mask)
+                # curr_hidden = self.maxpool(hidden[-1]).squeeze(-1) #(N, V)
+                # zero_tensor = torch.ones_like(curr_hidden) * -1e1
+                # curr_hidden = torch.where(mask, curr_hidden, zero_tensor)
+                # att = torch.softmax(curr_hidden, dim=1) #(N, V)
+                # argmax_att = torch.argmax(att, dim=-1)
+                # hidden = hidden.gather(dim=2, index=argmax_att.unsqueeze(0).unsqueeze(-1).unsqueeze(-1).repeat((hidden.shape[0], 1, 1, hidden.shape[-1]))).squeeze(-2) #(L, N, H)
+                # last_location = last_location.gather(dim=1, index=argmax_att.unsqueeze(-1).unsqueeze(-1).unsqueeze(-1).repeat((1, 1, last_location.shape[-2], last_location.shape[-1]))).squeeze(1)
             else:
                 hidden = hidden[:,:,0].contiguous()
                 last_location = last_location[:,0].contiguous()
@@ -127,12 +119,12 @@ class Seq2Seq(nn.Module):
             # teacher_force = np.random.random() < teacher_forcing_ratio
             # decoder_input = (teacher_location[:,t:t+1] if (teacher_location.dim() > 1) and teacher_force else now_out)
             decoder_input = now_out
-
+        outputs = outputs.reshape(batch_size, -1, outputs.shape[-2], outputs.shape[-1])
         # att = None
         if self.training:
-            return outputs.permute(0,2,1).unsqueeze(-1), att
+            return outputs.permute(0,3,2,1), att
         else:
-            return outputs[:,history_frames:].permute(0,2,1).unsqueeze(-1), att
+            return outputs[:,:,history_frames:].permute(0,3,2,1), att
 
 ####################################################
 ####################################################

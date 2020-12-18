@@ -33,16 +33,16 @@ if config.map_type == "argo":
 CUDA_VISIBLE_DEVICES='0'
 os.environ["CUDA_VISIBLE_DEVICES"] = CUDA_VISIBLE_DEVICES
 
-def seed_torch(seed=0):
-    random.seed(seed)
-    os.environ['PYTHONHASHSEED'] = str(seed)
-    np.random.seed(seed)
-    torch.manual_seed(seed)
-    torch.cuda.manual_seed(seed)
-    torch.cuda.manual_seed_all(seed) # if you are using multi-GPU.
-    torch.backends.cudnn.benchmark = False
-    torch.backends.cudnn.deterministic = True
-seed_torch()
+# def seed_torch(seed=0):
+#     random.seed(seed)
+#     os.environ['PYTHONHASHSEED'] = str(seed)
+#     np.random.seed(seed)
+#     torch.manual_seed(seed)
+#     torch.cuda.manual_seed(seed)
+#     torch.cuda.manual_seed_all(seed) # if you are using multi-GPU.
+#     torch.backends.cudnn.benchmark = False
+#     torch.backends.cudnn.deterministic = True
+# seed_torch()
 
 def my_print(pra_content):
     with open(log_file, 'a') as writer:
@@ -92,11 +92,7 @@ def visulize(outputs, targets, output_mask, lanes=None, att=None, label=None):
     global count
     # targets: N C T V
     # lanes: N' C' T' V'
-    # att: N T*V, T'*V'
-    # outputs *= 5 
-    # targets *= 5
-    # outputs = outputs.astype("int") + 255 
-    # targets = targets.astype("int") + 255\
+    # att: N T*V, T'*V
     history_frame_num = targets.shape[2] - outputs.shape[2]
     idx = 0
     for outs, tars, mask in zip(outputs, targets, output_mask):
@@ -183,7 +179,7 @@ def visulize(outputs, targets, output_mask, lanes=None, att=None, label=None):
                 img = cv2.putText(img, "ADE  [{:.3f}]".format(np.mean(x2y2)), (10, 80), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0,0,0), thickness=1)
                 img = cv2.putText(img, "range[{:.3f}]".format(abs(scale_val * 512)), (360,480), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0,0,0), thickness=1)
                 cv2.imshow("img_grip", img)
-                cv2.waitKey(1)
+                cv2.waitKey(0)
                 if not config.train and config.save_view:
                     save_path = os.path.join(config.save_view_path, obs_info)
                     cv2.imwrite(save_path, img)
@@ -413,13 +409,14 @@ def train_model(pra_model, pra_data_loader, pra_optimizer, pra_epoch_log):
         # rescale_xy[:,:,0,0] = max_xy
         data, no_norm_loc_data, object_type = preprocess_data(ori_data, rescale_xy)
         map_data, _, _, = preprocess_data(ori_map_data, rescale_xy)
-        trajectory, _, _, = preprocess_data(ori_trajectory, rescale_xy, [1,2,3,4])
+        trajectory, no_norm_trajectory, _, = preprocess_data(ori_trajectory, rescale_xy, [1,2,3,4])
         lane_label = torch.argmax(lane_label, dim=1).long().to(dev)
         for now_history_frames in range(history_frames, history_frames + 1):
             # for now_history_frames in range(1, data.shape[-2]):
             input_data = data[:,:,:now_history_frames,:] # (N, C, T, V)=(N, 4, 6, 120)
             output_loc_GT = data[:,:2,now_history_frames:,:] # (N, C, T, V)=(N, 2, 6, 120)
             input_trajectory = trajectory[:,:,:now_history_frames,:]
+            # input_no_norm_trajectory = no_norm_trajectory[:,:,:now_history_frames,:]
             output_trajectory_GT = trajectory[:,:2,now_history_frames:,:] # (N, C, T, V)=(N, 2, 6, 120)
             
             A = A.float().to(dev)
@@ -427,7 +424,9 @@ def train_model(pra_model, pra_data_loader, pra_optimizer, pra_epoch_log):
             predicted, att = pra_model(pra_x=input_trajectory, pra_map=trajectory, pra_A=A, pra_pred_length=output_trajectory_GT.shape[-2]) #, pra_teacher_forcing_ratio=0, pra_teacher_location=output_loc_GT (N, C, T, V)=(N, 2, 6, 120)
             
             argmax_att = torch.argmax(att, dim=-1).unsqueeze(-1).unsqueeze(-1).unsqueeze(-1)
+            predicted = predicted.gather(dim=-1, index=argmax_att.repeat((1, predicted.shape[1], predicted.shape[2], 1)))
             trajectory = trajectory.gather(dim=-1, index=argmax_att.repeat((1, trajectory.shape[1], trajectory.shape[2], 1)))
+            trajectory = trajectory[:,:,:,0:1]
 
             output_trajectory_GT = trajectory[:,:2,now_history_frames:,:1]
             history_output_trajectory_GT = trajectory[:,:2,:now_history_frames,:1]
@@ -496,13 +495,13 @@ def val_model(pra_model, pra_data_loader):
             A = A.float().to(dev)
             predicted, att = pra_model(pra_x=input_trajectory, pra_map=trajectory, pra_A=A, pra_pred_length=output_trajectory_GT.shape[-2]) #, pra_teacher_forcing_ratio=0, pra_teacher_location=output_loc_GT (N, C, T, V)=(N, 2, 6, 120)
 
-            argmax_att = torch.argmax(att, dim=-1).unsqueeze(-1).unsqueeze(-1).unsqueeze(-1).repeat((1, ori_trajectory.shape[1], ori_trajectory.shape[2], 1))
+            argmax_att = torch.argmax(att, dim=-1).unsqueeze(-1).unsqueeze(-1).unsqueeze(-1)
             ori_trajectory = ori_trajectory.float().to(config.dev)
-            ori_trajectory = ori_trajectory.float().gather(dim=-1, index=argmax_att)
-            # ori_trajectory = ori_trajectory[:,:,:,:1]
-
-            ori_output_last_trajectory = ori_trajectory[:,1:3,now_history_frames-1:now_history_frames,:1]
             ori_lane_id = ori_trajectory[:,0]
+            ori_trajectory = ori_trajectory.gather(dim=-1, index=argmax_att.repeat((1, ori_trajectory.shape[1], ori_trajectory.shape[2], 1)))
+            # ori_trajectory = ori_trajectory[:,:,:,0:1].float().to(config.dev)
+
+            ori_output_last_trajectory = ori_trajectory[:,1:3,now_history_frames-1:now_history_frames,:]
             
             predicted = predicted * rescale_xy
             if config.vel_mode:
@@ -511,17 +510,25 @@ def val_model(pra_model, pra_data_loader):
                 predicted += ori_output_last_trajectory
 
             """ 
-            predicted:   [N, C=2, T, V]
-            ori_mean_xy: [N, 2]
-            seq_id_city: [N, 2]
-            ori_lane_id: [N, T, V]
+            predicted:   [C=2, T, V]
+            ori_mean_xy: [2]
+            seq_id_city: [2]
+            ori_lane_id: [T, V]
             """
+            now_ori_data = ori_data.detach().cpu().numpy() # (N, C, T, V)=(N, 11, 6, 120)
+            now_map_data = ori_map_data.detach().cpu().numpy()
+            now_att = att.detach().cpu().numpy()
             for n, (now_pred, now_mean_xy, now_seq_id_city, now_lane_id) in enumerate(zip(predicted, ori_mean_xy, seq_id_city, ori_lane_id)):
-                predicted[n] = get_xy_trajectory(now_pred, now_mean_xy, now_seq_id_city, now_lane_id, now_history_frames)
+                for v in range(now_pred.shape[-1]):
+                    if output_mask[n,0,0,v].item() != 0:
+                        predicted[n,:,:,v:v+1] = get_xy_trajectory(now_pred[:,:,v:v+1], now_mean_xy, now_seq_id_city, now_lane_id[:,v:v+1], now_history_frames)
+                        if config.view:
+                            visulize(predicted[n:n+1,:,:,v:v+1].detach().cpu().numpy(), now_ori_data[n:n+1, :5, :, :], now_ori_data[n:n+1, -1:, -1:, :], now_map_data[n:n+1, 3:5], now_att[n:n+1], lane_label[n:n+1])
 
-            argmax_att = torch.argmax(att, dim=-1).unsqueeze(-1).unsqueeze(-1).unsqueeze(-1)
-            ori_output_loc_GT = ori_output_loc_GT.gather(dim=-1, index=argmax_att.repeat((1, ori_output_loc_GT.shape[1], ori_output_loc_GT.shape[2], 1)))
+            # argmax_att = torch.argmax(att, dim=-1).unsqueeze(-1).unsqueeze(-1).unsqueeze(-1)
+            # ori_output_loc_GT = ori_output_loc_GT.gather(dim=-1, index=argmax_att.repeat((1, ori_output_loc_GT.shape[1], ori_output_loc_GT.shape[2], 1)))
 
+            predicted = predicted.gather(dim=-1, index=argmax_att.repeat((1, predicted.shape[1], predicted.shape[2], 1)))
             overall_sum_time, overall_num, x2y2 = compute_RMSE(predicted[:,:,:,0:1], ori_output_loc_GT[:,:,:,0:1], output_mask[:,:,:,0:1])       
             now_x2y2 = x2y2.detach().cpu().numpy()
             now_x2y2 = now_x2y2.sum(axis=-1)
@@ -530,12 +537,9 @@ def val_model(pra_model, pra_data_loader):
             all_overall_num_list.extend(overall_num)
             all_overall_sum_list.extend(now_x2y2)
 
-            now_pred = predicted.detach().cpu().numpy() # (N, C, T, V)=(N, 2, 6, 120)
-            now_ori_data = ori_data.detach().cpu().numpy() # (N, C, T, V)=(N, 11, 6, 120)
-            now_map_data = ori_map_data.detach().cpu().numpy()
-            now_att = att.detach().cpu().numpy()
-            if config.view:
-                visulize(now_pred[:,:,:,0:1], now_ori_data[:, :5, :, 0:1], now_ori_data[:, -1:, -1:, 0:1], now_map_data[:, 3:5], now_att, lane_label)
+            # now_pred = predicted.detach().cpu().numpy() # (N, C, T, V)=(N, 2, 6, 120)
+            # if config.view:
+            #     visulize(now_pred[:,:,:,0:1], now_ori_data[:, :5, :, 0:1], now_ori_data[:, -1:, -1:, 0:1], now_map_data[:, 3:5], now_att, lane_label)
 
     all_overall_sum_list = np.array(all_overall_sum_list)
     all_overall_num_list = np.array(all_overall_num_list)
@@ -588,7 +592,6 @@ def test_model(pra_model, pra_data_loader, all_pred_trajectory, all_gt_trajector
             # ori_trajectory = ori_trajectory.float().gather(dim=-1, index=argmax_att)
             ori_trajectory = ori_trajectory[:,:,:,:1]
 
-            ori_output_trajectory_GT = ori_trajectory[:,1:3,now_history_frames:,:]
             ori_output_last_trajectory = ori_trajectory[:,1:3,now_history_frames-1:now_history_frames,:1]
             ori_lane_id = ori_trajectory[:,0]
             
@@ -639,7 +642,7 @@ def run_trainval(pra_model, pra_traindata_path, pra_testdata_path):
     pre_loss = float("inf")
     best_epoch = 0
     train_data_files = sorted([os.path.join(pra_traindata_path, f) for f in os.listdir(pra_traindata_path) if f.split(".")[-1] == "pkl"])
-    # train_data_files = train_data_files[:1]
+    train_data_files = train_data_files[:1]
     for now_epoch in range(total_epoch):
         total_train_loss = 0
         total_val_loss = 0
@@ -686,7 +689,7 @@ def run_val(pra_model, pra_data_path):
     pra_model.eval()
     val_data_files = sorted([os.path.join(pra_data_path, f) for f in os.listdir(pra_data_path) if f.split(".")[-1] == "pkl"])
     total_val_loss = 0
-    # val_data_files = val_data_files[:1]
+    val_data_files = val_data_files[:1]
     for idx, val_data_file in enumerate(val_data_files):
         my_print('#######################################Val_%02d/%02d'%(idx+1, len(val_data_files)))
         loader_val = data_loader(val_data_file, pra_batch_size=batch_size_val, pra_shuffle=False, pra_drop_last=False, train_val_test='test')
@@ -778,9 +781,9 @@ if __name__ == '__main__':
             # train_data_file = os.path.join(data_root, train_data_path, train_data_file)
         run_trainval(model, pra_traindata_path=train_data_path, pra_testdata_path=test_data_file)
     else:
-        # run_val(model, val_data_path)
+        run_val(model, val_data_path)
         # run_test(model, val_data_path)
-        run_test(model, test_data_path)
+        # run_test(model, test_data_path)
     
         
         

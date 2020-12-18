@@ -20,6 +20,7 @@ class Attention(nn.Module):
         :param C: the length of input feature vector.
         """
         super(Attention, self).__init__()
+        self.C = C
         # self.linear = clones(nn.Linear(C, C), 3)
         self.klinear = nn.Linear(C, C)
         self.qlinear = nn.Linear(C, C)
@@ -50,39 +51,40 @@ class Attention(nn.Module):
         
         
 
-        L, N, C = P.shape
-        mL, mNV, mC = M.shape
-        mN = N
-        mV = mNV // mN
+        L, N, V, C = P.shape
+        mL, mN, mV, mC = M.shape
+        # mN = N
+        # mV = mNV // mN
         # M = M.permute(0, 2, 3, 1)
-        M = M.view(mN, mV, mL, mC).contiguous()
+        # M = M.view(mN, mV, mL, mC).contiguous()
         # M = M.view(mN, mV*mT, mC)
 
-        P = P.reshape((-1, 1, C))
+        P = P.reshape((-1, V, C))
         M = M.reshape((-1, mV, mC)) 
-        Q = self.klinear(P) # (LN, 1, C)
-        K = self.qlinear(M)  # (mLN, mV, C)
-        V = self.vlinear(M) # (mLN, mV, C)
-        ans = torch.matmul(Q, K.permute(0, 2, 1))  # [LN, 1, mV]
+        Query = self.klinear(P) # (LN, V, C)
+        Key = self.qlinear(M)  # (mLN, mV, C)
+        Value = self.vlinear(M) # (mLN, mV, C)
+        ans = torch.matmul(Query, Key.permute(0, 2, 1))  # [LN, V, mV]
 
-        mask = mask.unsqueeze(1) # [N, 1, mV]
-        mask = mask.repeat((L,1,1)) # [LN, 1, mV]
+        mask = mask.unsqueeze(1) # [N, V, mV]
+        mask = mask.repeat((L,V,1)) # [LN, V, mV]
         zero_tensor = torch.ones_like(ans) * -1e1
         ans = torch.where(mask, ans, zero_tensor)
         ans = F.softmax(ans, dim=-1)
 
-        att = ans # [LN, 1, mV]
-        att = att.reshape((L, N, 1, -1)) # [L, N, 1, mV]
-        att = torch.mean(att, dim=[0]) # (N, 1, mV)
+        att = ans # [LN, V, mV]
+        att = att.reshape((L, N, V, -1)) # [L, N, V, mV]
+        att = torch.mean(torch.mean(att, dim=[0]),dim=[-2]) # (N, V)
 
         if self.hard:
             argmax_att = torch.argmax(att, dim=-1).unsqueeze(-1).repeat((L,1,1)) # [LN, 1, 1]
             ans = torch.zeros_like(ans).scatter(2, argmax_att, 1)
 
 
-        ans = torch.matmul(ans, V) #[LN, 1, mV]*[LN, mV, C] --> [LN, 1, C]
-        ans = ans.squeeze(1).reshape((L,N,C))
-        att = att.squeeze(1)
+        ans = torch.matmul(ans, Value) #[LN, V, mV]*[LN, mV, C] --> [LN, V, C]
+        ans = ans.reshape((L,N*V,-1))
+        # ans = ans.squeeze(1).reshape((L,N,C))
+        # att = att.squeeze(1)
 
         return ans, att
 

@@ -145,8 +145,6 @@ def process_trajectory_data(id, city, now_traj_sl:list, trajectory_sl_list:list,
     s = 0
     l = 0
     idx = ori_idx
-    # if lane_id == 9609285:
-    #     print(lane_id)
     while idx < trajectory.shape[0]:
         if trajectory[idx][-1] == 0:
             now_traj_sl.append([0,0,0,0,0])
@@ -169,7 +167,7 @@ def process_trajectory_data(id, city, now_traj_sl:list, trajectory_sl_list:list,
         tmp = np.array(now_traj_sl, dtype="float")
         if len(trajectory_sl_list) == 0 or not np.any([np.array_equal(tmp[:,0], traj[:,0]) for traj in trajectory_sl_list]):
             trajectory_sl_list.append(tmp)
-    elif len(now_traj_sl) > 0:
+    elif len(now_traj_sl) > 0 or s == lane_length:
         if not lane.successors is None and deepth < 10:
             deepth += 1
             for s_id in lane.successors:
@@ -229,44 +227,105 @@ def process_map_data(center, trajectory, search_radius, point_num, mean_xy, city
         if config.only_nearby_lanes:
             idList = []
             while not idList:
-                idList = avm.get_lane_ids_in_xy_bbox(center[0], center[1], city, 100)
+                idList = avm.get_lane_ids_in_xy_bbox(center[0], center[1], city, 10)
                 search_radius *= 2
             # _ = avm.get_nearest_centerline(center, city, visualize=True)
             idList = np.array(idList, dtype="int")
             nearby_lane_objs = [avm.city_lane_centerlines_dict[city][lane_id] for lane_id in idList]
             per_lane_dists, min_dist_nn_indices, _ = centerline_utils.lane_waypt_to_query_dist(center, nearby_lane_objs)
-
+            # oracle_lane = centerline_utils.get_oracle_from_candidate_centerlines(nearby_lane_objs, trajectory)
             curr_lane_ids = idList[per_lane_dists < 5]
+            # start_point = trajectory[0]
+            # end_point = trajectory[1]
+            # ego_heading = np.arctan2(end_point[1] - start_point[1], end_point[0] - start_point[0])
+            # angle_diff = []
+            # for now_lane in nearby_lane_objs:
+            #     now_segment = now_lane.centerline
+            #     now_lane_string = LineString(now_segment)
+            #     lane_length = now_lane_string.length
+            #     start_s, _ = centerline_utils.get_normal_and_tangential_distance_point(start_point[0], start_point[1], now_segment)
+            #     if start_s <=0 or start_s >= lane_length:
+            #         angle_diff.append(np.pi)
+            #         continue
+            #     start_inter = now_lane_string.interpolate(start_s).bounds
+            #     end_s, _ = centerline_utils.get_normal_and_tangential_distance_point(end_point[0], end_point[1], now_segment)
+            #     if end_s <= 0 or end_s >= lane_length:
+            #         angle_diff.append(np.pi)
+            #         continue
+            #     end_inter = now_lane_string.interpolate(end_s).bounds
+            #     lane_heanding = np.arctan2(end_inter[1] - start_inter[1], end_inter[0] - start_inter[0])
+            #     angle_diff.append(ego_heading - lane_heanding)
+            # angle_diff = np.array(angle_diff, dtype="float")
+            # curr_lane_index = np.pi - np.abs(np.abs(angle_diff) - np.pi) < np.pi / 2
+            # curr_lane_ids = []
+            # for index in min_dist_nn_indices:
+            #     if curr_lane_index[index] == True:
+            #         curr_lane_ids.append(idList[index])
+            #         break;
+            # if not curr_lane_ids:
+            #     curr_lane_ids.append(idList[min_dist_nn_indices[0]])
             nearest_lane = idList[min_dist_nn_indices[0]]
             if nearest_lane not in curr_lane_ids:
                 curr_lane_ids = np.append(curr_lane_ids, nearest_lane)
-            idList = []
+            curr_idList = []
             for lane_id in curr_lane_ids:
-                if lane_id not in idList:
-                    idList.append(lane_id)
+                # if lane_id == 9609314:
+                #     print(lane_id)
+                if lane_id not in curr_idList:
+                    curr_idList.append(lane_id)
                 curr_lane = avm.city_lane_centerlines_dict[city][lane_id]
-                if not curr_lane.l_neighbor_id is None and curr_lane.l_neighbor_id not in idList:
-                    idList.append(curr_lane.l_neighbor_id)
-                if not curr_lane.r_neighbor_id is None and curr_lane.r_neighbor_id not in idList:
-                    idList.append(curr_lane.r_neighbor_id)
+                if not curr_lane.l_neighbor_id is None and curr_lane.l_neighbor_id not in curr_idList:
+                    curr_idList.append(curr_lane.l_neighbor_id)
+                if not curr_lane.r_neighbor_id is None and curr_lane.r_neighbor_id not in curr_idList:
+                    curr_idList.append(curr_lane.r_neighbor_id)
                 # if not curr_lane.predecessors is None:
                 #     for p_id in curr_lane.predecessors:
-                #         if p_id not in idList:
-                #             idList.append(p_id)
+                #         if p_id not in curr_idList:
+                #             curr_idList.append(p_id)
                 # if not curr_lane.successors is None:
                 #     for s_id in curr_lane.successors:
-                #         if s_id not in idList:
-                #             idList.append(s_id)
+                #         if s_id not in curr_idList:
+                #             curr_idList.append(s_id)
         else:
-            idList = np.array(avm.get_lane_ids_in_xy_bbox(mean_xy[0], mean_xy[1], city, search_radius), dtype="int")
-        # print(idList)
-        for ln, id in enumerate(idList):
+            curr_idList = np.array(avm.get_lane_ids_in_xy_bbox(mean_xy[0], mean_xy[1], city, search_radius), dtype="int")
+        # print(curr_idList)
+        for ln, id in enumerate(curr_idList):
             # print(id)
             now_traj_sl = []
             process_trajectory_data(id, city, now_traj_sl, trajectory_sl_list, trajectory, 0, 0)
-
+        
+        for min_idx in min_dist_nn_indices:
+            if len(trajectory_sl_list) == 0:
+                now_traj_sl = []
+                process_trajectory_data(idList[min_idx], city, now_traj_sl, trajectory_sl_list, trajectory, 0, 0)
+            else:
+                break
+        # if len(trajectory_sl_list) == 0:
+        #     _ = avm.get_nearest_centerline(center, city, visualize=True)
         trajectory_sl_list = np.array(trajectory_sl_list, dtype="float")
 
+        try:
+            mean_lane_l = np.mean(np.abs(trajectory_sl_list[:, :, 2]), axis=1)
+            sorted_lane_idx = np.argsort(mean_lane_l, axis=0)
+            curr_lane_id = trajectory_sl_list[sorted_lane_idx[0],0,0]
+
+            curr_trajectory_sl_list = []
+            curr_trajectory_sl_list.append(trajectory_sl_list[sorted_lane_idx[0]])
+            curr_lane = avm.city_lane_centerlines_dict[city][curr_lane_id]
+            if not curr_lane.l_neighbor_id is None:
+                for trajectory_sl in trajectory_sl_list:
+                    if trajectory_sl[0,0] == curr_lane.l_neighbor_id:
+                        curr_trajectory_sl_list.append(trajectory_sl)
+                        break
+
+            if not curr_lane.r_neighbor_id is None:
+                for trajectory_sl in trajectory_sl_list:
+                    if trajectory_sl[0,0] == curr_lane.r_neighbor_id:
+                        curr_trajectory_sl_list.append(trajectory_sl)
+                        break
+            trajectory_sl_list = np.array(curr_trajectory_sl_list, dtype="float")
+        except:
+            print(trajectory_sl_list)
         for lane_num, traj_sl in enumerate(trajectory_sl_list):
             now_map_feature = process_lane_data(traj_sl, mean_xy, city, lane_num)
             map_feature_list.append(now_map_feature)
@@ -289,7 +348,7 @@ def process_map_data(center, trajectory, search_radius, point_num, mean_xy, city
     if map_feature_list.shape[0] > map_num:
         map_num = map_feature_list.shape[0]
         # print("\nmap_num: %d"%map_num)
-    return map_feature_list, trajectory_sl_list
+    return map_feature_list, trajectory_sl_list, idList
 
 
 
@@ -337,7 +396,7 @@ def process_data(pra_now_dict, pra_start_ind, pra_end_ind, pra_observed_last, fr
     ego_trajectory = object_feature_list[:, 0, 3:].copy()
     ego_trajectory[:, :2] += m_xy
 
-    map_feature_list, trajectory_sl_list = process_map_data(ego_position, ego_trajectory, config.lane_search_radius, config.segment_point_num, m_xy, city)
+    map_feature_list, trajectory_sl_list, idList = process_map_data(ego_position, ego_trajectory, config.lane_search_radius, config.segment_point_num, m_xy, city)
     for map_feat in map_feature_list:
         if np.array_equal(map_feat[0,3:5], map_feat[-1,3:5]):
             print(map_feat)
@@ -350,19 +409,20 @@ def process_data(pra_now_dict, pra_start_ind, pra_end_ind, pra_observed_last, fr
     trajectory_frame_feature = np.zeros((max_num_map, object_feature_list.shape[0], 5))
     curr_lane_label = np.zeros(max_num_map)
     try:
-        mean_lane_l = np.mean(np.abs(trajectory_sl_list[:, :, 2]), axis=1)
+        # mean_lane_l = np.mean(np.abs(trajectory_sl_list[:, :, 2]), axis=1)
         # curr_lane_l = np.abs(trajectory_sl_list[:,history_frames -1, 2])
         # lane_l = np.concatenate((curr_lane_l, mean_lane_l)
-        sorted_lane_idx = np.argsort(mean_lane_l, axis=0)
-        sorted_lane_idx = sorted_lane_idx[:min(max_num_map, len(sorted_lane_idx))]
-        map_feature_list = map_feature_list[sorted_lane_idx]
-        trajectory_sl_list = trajectory_sl_list[sorted_lane_idx]
+        # sorted_lane_idx = np.argsort(mean_lane_l, axis=0)
+        # sorted_lane_idx = sorted_lane_idx[:min(max_num_map, len(sorted_lane_idx))]
+        # map_feature_list = map_feature_list[sorted_lane_idx]
+        # trajectory_sl_list = trajectory_sl_list[sorted_lane_idx]
         curr_lane_label[0] = 1
         ego_trajectory[:, :2] -= m_xy
-        # visulize(np.transpose(ego_trajectory[:,:2], (1,0)), np.transpose(map_feature_list[:,:,3:5], (2,1,0)), curr_lane_label)    
         map_frame_feature[:map_feature_list.shape[0]] = map_feature_list
         trajectory_frame_feature[:trajectory_sl_list.shape[0]] = trajectory_sl_list    
     except:
+        # visulize(np.transpose(ego_trajectory[:,:2], (1,0)), np.transpose(map_feature_list[:,:,3:5], (2,1,0)), curr_lane_label)    
+        # _ = avm.get_nearest_centerline(ego_position, city, visualize=True)
         print(trajectory_sl_list)
     
     # np.transpose(object_feature_list, (1,0,2))
@@ -544,23 +604,23 @@ if __name__ == '__main__':
 
     print("train data root: %s"%data_root)
     
-    # train_data_length = len(train_data_path_list) // train_data_size
-    # if len(train_data_path_list) % train_data_size != 0:
-    #     train_data_length += 1 
-    # for idx in range(0,train_data_length):#
-    #     print('Generating Training Data_%02d/%02d'%(idx+1, train_data_length))
-    #     start_index = idx * train_data_size
-    #     end_index = min((idx + 1) * train_data_size, len(train_data_path_list))
-    #     generate_data(train_data_path_list[start_index:end_index], pra_is_train="train", idx=idx)
+    train_data_length = len(train_data_path_list) // train_data_size
+    if len(train_data_path_list) % train_data_size != 0:
+        train_data_length += 1 
+    for idx in range(0,train_data_length):#
+        print('Generating Training Data_%02d/%02d'%(idx+1, train_data_length))
+        start_index = idx * train_data_size
+        end_index = min((idx + 1) * train_data_size, len(train_data_path_list))
+        generate_data(train_data_path_list[start_index:end_index], pra_is_train="train", idx=idx)
 
-    # val_data_length = len(val_data_path_list) // val_data_size
-    # if len(val_data_path_list) % val_data_size != 0:
-    #     val_data_length += 1 
-    # for idx in range(val_data_length):#
-    #     print('Generating Validate Data_%02d/%02d'%(idx+1, val_data_length))
-    #     start_index = idx * val_data_size
-    #     end_index = min((idx + 1) * val_data_size, len(val_data_path_list))
-    #     generate_data(val_data_path_list[start_index:end_index], pra_is_train="val", idx=idx)
+    val_data_length = len(val_data_path_list) // val_data_size
+    if len(val_data_path_list) % val_data_size != 0:
+        val_data_length += 1 
+    for idx in range(val_data_length):#
+        print('Generating Validate Data_%02d/%02d'%(idx+1, val_data_length))
+        start_index = idx * val_data_size
+        end_index = min((idx + 1) * val_data_size, len(val_data_path_list))
+        generate_data(val_data_path_list[start_index:end_index], pra_is_train="val", idx=idx)
 
     test_data_length = len(test_data_path_list) // test_data_size
     if len(test_data_path_list) % test_data_size != 0:

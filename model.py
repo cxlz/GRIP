@@ -98,11 +98,6 @@ class Model(nn.Module):
 
         x = self.conv_network(x)
         for gcn in self.st_gcn_networks:
-            # importance = self.edge_importance[ii]
-            # if type(gcn) is nn.BatchNorm2d or type(gcn) is nn.Conv2d:
-            #     x = gcn(x)
-            # else:
-            # x, _ = gcn(x, pra_A + importance)
             x, _ = gcn(x, pra_A)
                 
         # prepare for seq2seq lstm model
