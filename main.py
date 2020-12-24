@@ -15,13 +15,14 @@ import itertools
 from tqdm import tqdm
 import time
 from types import ModuleType
-from util.map_util import HDMap
+# from util.map_util import HDMap
 
 from argoverse.evaluation.competition_util import generate_forecasting_h5
 from argoverse.evaluation import eval_forecasting
 from argoverse.map_representation.map_api import ArgoverseMap
 from argoverse.utils import centerline_utils
 from shapely.geometry import LineString
+from argoverse.map_representation.lane_segment import LaneSegment
 
 import config.configure as config
 # from util.map_util import HDMap, LaneSegment
@@ -99,7 +100,7 @@ def visulize(outputs, targets, output_mask, lanes=None, att=None, label=None):
         for i in range(outs.shape[-1]):
             img = np.ones((512,512,3)) * 255
             out = outs[:,:,i].copy()
-            tar = tars[-2:,:,i].copy()
+            tar = tars[-2:,:,0].copy()
             if mask[0, 0, i] == 1:
                 if not lanes is None:
                     lane = lanes[idx].copy() # C' T' V'
@@ -130,13 +131,14 @@ def visulize(outputs, targets, output_mask, lanes=None, att=None, label=None):
                             thickness = 1
                             if abs(a[ii] - a[argmax_a]) < 1e-6: #config.use_map and 
                                 color = (0,255,0)
-                            if label[i] == ii:
+                            if label[0] == ii:
                                 thickness = 2   
                             p1 = segment[:,jj]
                             p2 = segment[:, jj + 1]
                             if (p1[0] != zero_pos[0] or p1[1] != zero_pos[1]) and (p2[0] != zero_pos[0] or p2[1] != zero_pos[1]):
                                 img = cv2.line(img, (p1[0], p1[1]), (p2[0], p2[1]), color, thickness)
-                            if (a[ii] > 0.2 or abs(a[ii] - a[argmax_a]) < 1e-6) and jj == segment.shape[-1] * ii // lane.shape[-1]:
+                            # if (a[ii] > 0.2 or abs(a[ii] - a[argmax_a]) < 1e-6) and jj == segment.shape[-1] * ii // lane.shape[-1]:
+                            if ii == i and jj == 0:
                                 img = cv2.putText(img, "%.2f"%a[ii], (p1[0], p1[1]), cv2.FONT_HERSHEY_COMPLEX, 0.3, (0,0,0), 1)
                         # cv2.imshow("img_grip", img)
                         # cv2.waitKey(1)
@@ -172,14 +174,14 @@ def visulize(outputs, targets, output_mask, lanes=None, att=None, label=None):
                         continue
 
 
-                obs_info = "obs[{:0>5d}]_frame[{:0>5d}]_type[{:d}]_[{:0>4d}].jpg".format(*(tars[(1,0,2),history_frame_num,i].astype("int")), count)
+                obs_info = "obs[{:0>5d}]_frame[{:0>5d}]_type[{:d}]_[{:0>4d}].jpg".format(*(tars[(1,0,2),history_frame_num,0].astype("int")), count)
                 img = cv2.putText(img, obs_info, (10,20), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0,0,0), thickness=1)
                 img = cv2.putText(img, "speed[{:.3f}]".format(last_speed),    (10, 40), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0,0,0), thickness=1)
                 img = cv2.putText(img, "FDE  [{:.3f}]".format(x2y2[-1]),      (10, 60), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0,0,0), thickness=1)
                 img = cv2.putText(img, "ADE  [{:.3f}]".format(np.mean(x2y2)), (10, 80), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0,0,0), thickness=1)
                 img = cv2.putText(img, "range[{:.3f}]".format(abs(scale_val * 512)), (360,480), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0,0,0), thickness=1)
                 cv2.imshow("img_grip", img)
-                cv2.waitKey(0)
+                cv2.waitKey(1)
                 if not config.train and config.save_view:
                     save_path = os.path.join(config.save_view_path, obs_info)
                     cv2.imwrite(save_path, img)
@@ -283,7 +285,7 @@ def point_from_lane(lane_id, s, l, city):
     n_point = curr_point
     if (s + 0.3) < lane_string.length:
         n_point = lane_string.interpolate(s + 0.3).bounds
-        heading = np.arctan2((n_point[1] - curr_point[1]), (n_point[1] - curr_point[1]))
+        heading = np.arctan2((n_point[1] - curr_point[1]), (n_point[0] - curr_point[0]))
     else:
         n_point = lane_string.interpolate(max(s - 0.3, 0)).bounds
         heading = np.arctan2((curr_point[1] - n_point[1]), (curr_point[0] - n_point[0]))
@@ -291,7 +293,7 @@ def point_from_lane(lane_id, s, l, city):
     y = curr_point[1] + l * np.cos(heading)
     return x, y
 
-def get_lane_length(lane_id, city):
+def get_lane_length(lane_id, city) -> (LaneSegment, float):
     try:
         lane = avm.city_lane_centerlines_dict[city][lane_id]
     except:
@@ -300,7 +302,7 @@ def get_lane_length(lane_id, city):
     segment = lane.centerline
     lane_string = LineString(segment)
     lane_length = lane_string.length
-    return lane_length
+    return lane, lane_length
 
 def get_xy_trajectory(predicted, now_mean_xy, seq_id_city, now_lane_id, now_history_frames, future_lane_id=[]):
     """ 
@@ -329,7 +331,7 @@ def get_xy_trajectory(predicted, now_mean_xy, seq_id_city, now_lane_id, now_hist
     accumulated_s = 0
     for l_idx in range(len(lane_id)):
         if lane_id[l_idx] != 0:
-            lane_length = get_lane_length(lane_id[l_idx], city)
+            lane, lane_length = get_lane_length(lane_id[l_idx], city)
             if lane_id[l_idx] == curr_lane_id:
                 break
             accumulated_s += lane_length
@@ -337,13 +339,19 @@ def get_xy_trajectory(predicted, now_mean_xy, seq_id_city, now_lane_id, now_hist
     for t in range(predicted.shape[1]):
         s = predicted[0, t] - accumulated_s
         l = predicted[1, t]
-        if s > lane_length and l_idx + 1 < len(lane_id):
-            l_idx += 1
-            if lane_id[l_idx] != 0:
+        if s > lane_length:
+            if l_idx + 1 < len(lane_id) and lane_id[l_idx + 1] != 0:
+                l_idx += 1
+                curr_lane_id = lane_id[l_idx]
                 accumulated_s += lane_length
                 s -= lane_length
-                curr_lane_id = lane_id[l_idx]
-                lane_length = get_lane_length(curr_lane_id, city)
+                lane, lane_length = get_lane_length(curr_lane_id, city)
+            elif not lane.successors is None:
+                curr_lane_id = lane.successors[0]
+                accumulated_s += lane_length
+                s -= lane_length
+                lane, lane_length = get_lane_length(curr_lane_id, city)
+
         x, y = point_from_lane(curr_lane_id, s, l, city)
         if x != 0 or y != 0:
             now_pred[0,t,0] = x - mean_xy[0]
@@ -354,7 +362,7 @@ def get_future_lane_id(now_lane_ids, curr_lane_id, city, future_s, future_lane_i
     curr_lane = avm.city_lane_centerlines_dict[city][curr_lane_id]
     if not curr_lane.successors is None:
         for s_id in curr_lane.successors:
-            s_lane_length = get_lane_length(s_id, city)
+            s_lane, s_lane_length = get_lane_length(s_id, city)
             now_lane_ids.append(s_id)
             if s_lane_length >= future_s:
                 future_lane_ids.append(now_lane_ids.copy())
@@ -376,7 +384,7 @@ def get_lane_id(predicted, ori_lane_id, seq_id_city):
         curr_lane_id = 0
         for l_idx in range(len(lane_id)):
             if lane_id[l_idx] != 0:
-                lane_length = get_lane_length(lane_id[l_idx], city)
+                lane, lane_length = get_lane_length(lane_id[l_idx], city)
                 accumulated_s += lane_length
                 curr_lane_id = lane_id[l_idx]
             else:
@@ -416,12 +424,12 @@ def train_model(pra_model, pra_data_loader, pra_optimizer, pra_epoch_log):
             input_data = data[:,:,:now_history_frames,:] # (N, C, T, V)=(N, 4, 6, 120)
             output_loc_GT = data[:,:2,now_history_frames:,:] # (N, C, T, V)=(N, 2, 6, 120)
             input_trajectory = trajectory[:,:,:now_history_frames,:]
-            # input_no_norm_trajectory = no_norm_trajectory[:,:,:now_history_frames,:]
+            input_no_norm_trajectory = no_norm_trajectory[:,:,:now_history_frames,:]
             output_trajectory_GT = trajectory[:,:2,now_history_frames:,:] # (N, C, T, V)=(N, 2, 6, 120)
             
             A = A.float().to(dev)
 
-            predicted, att = pra_model(pra_x=input_trajectory, pra_map=trajectory, pra_A=A, pra_pred_length=output_trajectory_GT.shape[-2]) #, pra_teacher_forcing_ratio=0, pra_teacher_location=output_loc_GT (N, C, T, V)=(N, 2, 6, 120)
+            predicted, att = pra_model(pra_x=input_trajectory, pra_map=input_no_norm_trajectory, pra_A=A, pra_pred_length=output_trajectory_GT.shape[-2]) #, pra_teacher_forcing_ratio=0, pra_teacher_location=output_loc_GT (N, C, T, V)=(N, 2, 6, 120)
             
             argmax_att = torch.argmax(att, dim=-1).unsqueeze(-1).unsqueeze(-1).unsqueeze(-1)
             predicted = predicted.gather(dim=-1, index=argmax_att.repeat((1, predicted.shape[1], predicted.shape[2], 1)))
@@ -489,21 +497,22 @@ def val_model(pra_model, pra_data_loader):
             ori_history_output_loc_GT = no_norm_loc_data[:,:2,:now_history_frames,:]
             ori_output_last_loc = no_norm_loc_data[:,:2,now_history_frames-1:now_history_frames,:1]
             input_trajectory = trajectory[:,:,:now_history_frames,:]
+            input_no_norm_trajectory = no_norm_trajectory[:,:,:now_history_frames,:]
             output_trajectory_GT = trajectory[:,:2,now_history_frames:,:] # (N, C, T, V)=(N, 2, 6, 120)
             output_mask = trajectory[:,-1:,now_history_frames:,:] # (N, C, T, V)=(N, 1, 6, 120)
 
             A = A.float().to(dev)
-            predicted, att = pra_model(pra_x=input_trajectory, pra_map=trajectory, pra_A=A, pra_pred_length=output_trajectory_GT.shape[-2]) #, pra_teacher_forcing_ratio=0, pra_teacher_location=output_loc_GT (N, C, T, V)=(N, 2, 6, 120)
+            pred, att = pra_model(pra_x=input_trajectory, pra_map=no_norm_trajectory, pra_A=A, pra_pred_length=output_trajectory_GT.shape[-2]) #, pra_teacher_forcing_ratio=0, pra_teacher_location=output_loc_GT (N, C, T, V)=(N, 2, 6, 120)
 
             argmax_att = torch.argmax(att, dim=-1).unsqueeze(-1).unsqueeze(-1).unsqueeze(-1)
             ori_trajectory = ori_trajectory.float().to(config.dev)
             ori_lane_id = ori_trajectory[:,0]
-            ori_trajectory = ori_trajectory.gather(dim=-1, index=argmax_att.repeat((1, ori_trajectory.shape[1], ori_trajectory.shape[2], 1)))
+            # ori_trajectory = ori_trajectory.gather(dim=-1, index=argmax_att.repeat((1, ori_trajectory.shape[1], ori_trajectory.shape[2], 1)))
             # ori_trajectory = ori_trajectory[:,:,:,0:1].float().to(config.dev)
 
             ori_output_last_trajectory = ori_trajectory[:,1:3,now_history_frames-1:now_history_frames,:]
             
-            predicted = predicted * rescale_xy
+            predicted = pred * rescale_xy
             if config.vel_mode:
                 for ind in range(1, predicted.shape[-2]):
                     predicted[:,:,ind] = torch.sum(predicted[:,:,ind-1:ind+1], dim=-2)
@@ -516,14 +525,16 @@ def val_model(pra_model, pra_data_loader):
             ori_lane_id: [T, V]
             """
             now_ori_data = ori_data.detach().cpu().numpy() # (N, C, T, V)=(N, 11, 6, 120)
+            now_ori_trajectory = ori_trajectory.detach().cpu().numpy() # (N, C, T, V)=(N, 11, 6, 120)
             now_map_data = ori_map_data.detach().cpu().numpy()
             now_att = att.detach().cpu().numpy()
+            predicted_loc = torch.zeros_like(predicted)
             for n, (now_pred, now_mean_xy, now_seq_id_city, now_lane_id) in enumerate(zip(predicted, ori_mean_xy, seq_id_city, ori_lane_id)):
                 for v in range(now_pred.shape[-1]):
                     if output_mask[n,0,0,v].item() != 0:
-                        predicted[n,:,:,v:v+1] = get_xy_trajectory(now_pred[:,:,v:v+1], now_mean_xy, now_seq_id_city, now_lane_id[:,v:v+1], now_history_frames)
-                        if config.view:
-                            visulize(predicted[n:n+1,:,:,v:v+1].detach().cpu().numpy(), now_ori_data[n:n+1, :5, :, :], now_ori_data[n:n+1, -1:, -1:, :], now_map_data[n:n+1, 3:5], now_att[n:n+1], lane_label[n:n+1])
+                        predicted_loc[n,:,:,v:v+1] = get_xy_trajectory(now_pred[:,:,v:v+1], now_mean_xy, now_seq_id_city, now_lane_id[:,v:v+1], now_history_frames)
+                if config.view:
+                    visulize(predicted_loc[n:n+1,:,:,:].detach().cpu().numpy(), now_ori_data[n:n+1, :5, :, :], now_ori_trajectory[n:n+1, -1:, 0:, :], now_map_data[n:n+1, 3:5], now_att[n:n+1], lane_label[n:n+1])
 
             # argmax_att = torch.argmax(att, dim=-1).unsqueeze(-1).unsqueeze(-1).unsqueeze(-1)
             # ori_output_loc_GT = ori_output_loc_GT.gather(dim=-1, index=argmax_att.repeat((1, ori_output_loc_GT.shape[1], ori_output_loc_GT.shape[2], 1)))

@@ -33,7 +33,7 @@ class DecoderRNN(nn.Module):
         self.num_layers = num_layers
         self.isCuda = isCuda
         # self.lstm = nn.LSTM(hidden_size, output_size, num_layers, batch_first=True)
-        self.lstm = nn.GRU(hidden_size, output_size*30, num_layers, batch_first=True)
+        self.lstm = nn.GRU(hidden_size, output_size*60, num_layers, batch_first=True)
 
         #self.relu = nn.ReLU()
         self.sigmoid = nn.Sigmoid()
@@ -63,7 +63,7 @@ class Seq2Seq(nn.Module):
         self.attention = Attention(hidden_size*30)
         self.maxpool = nn.MaxPool1d(hidden_size*30)
         self.dropout = nn.Dropout(p=dropout)
-        self.linear = nn.Linear(hidden_size*30, hidden_size)
+        self.linear = nn.Linear(hidden_size*60, hidden_size)
         
 
     def forward(self, in_data, last_location, map_data, pred_length:int=6, mask=torch.Tensor(), map_mask=torch.Tensor()): #, teacher_forcing_ratio:int=0, teacher_location=torch.zeros(1)
@@ -88,10 +88,11 @@ class Seq2Seq(nn.Module):
 
         if config.use_map:
             map_encoded_output, map_hidden = self.encoder(map_data) #map_data (NmV, mT, C) --> map_hidden (L, NmV, H)
-            map_hidden, att = self.attention(hidden, map_hidden, map_mask) #map_hidden (L, N, H) , att (N, mV)
-            hidden = hidden + map_hidden
-            # hidden = torch.cat((hidden, map_hidden), dim=-1)
-            hidden = torch.tanh(hidden)
+            map_hidden = map_hidden.view((map_hidden.shape[0], batch_size, -1, hidden.shape[-1])).contiguous()
+            map_hidden, att = self.attention(map_hidden, map_hidden, map_mask) #map_hidden (L, N, H) , att (N, mV)
+            # hidden = hidden + map_hidden
+            hidden = torch.cat((hidden, map_hidden), dim=-1)
+            # hidden = torch.tanh(hidden)
         else:
             curr_hidden = hidden.view((hidden.shape[0], batch_size, -1, hidden.shape[-1])).contiguous() #(L, N, V, H)
             # last_location = last_location.view(batch_size, -1, last_location.shape[-2], last_location.shape[-1]).contiguous()

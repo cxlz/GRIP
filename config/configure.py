@@ -58,14 +58,14 @@ loss_weight = [1, 1, 1]
 
 train = False
 load_model = False
-vel_mode = False
-use_map = False
+vel_mode = True
+use_map = True
 use_celoss = True
 use_history = False
 multi_lane = True
 convert_model = False
 
-pretrained_model_path = '/datastore/data/cxl/GRIP/trained_models/argo/all_data/model_argo_all_sl_mul_pos_1214_16:19:37_epoch_0024.pt'
+pretrained_model_path = '/datastore/data/cxl/GRIP/trained_models/argo/all_data/model_argo_all_sl_mul_pos_vel_1218_14:53:53_epoch_0024.pt'
 view = True 
 save_view = True
 save_view_path = os.path.join(work_dir, "view", pretrained_model_path.split(".")[0].split("/")[-1])

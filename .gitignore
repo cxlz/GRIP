@@ -7,3 +7,6 @@ trained_models/
 *_pb2.py
 *.bin
 *.proto
+data/
+grip_predictor/
+*.zip
