@@ -66,7 +66,7 @@ class Seq2Seq(nn.Module):
         self.linear = nn.Linear(hidden_size*60, hidden_size)
         
 
-    def forward(self, in_data, last_location, map_data, pred_length:int=6, mask=torch.Tensor(), map_mask=torch.Tensor()): #, teacher_forcing_ratio:int=0, teacher_location=torch.zeros(1)
+    def forward(self, in_data, last_location, map_data=torch.zeros(0), pred_length:int=6, mask=torch.zeros(0), map_mask=torch.zeros(0)): #, teacher_forcing_ratio:int=0, teacher_location=torch.zeros(1)
         
         
         batch_size = in_data.shape[0] // config.max_num_map

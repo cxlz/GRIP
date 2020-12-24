@@ -63,7 +63,7 @@ use_map = True
 use_celoss = True
 use_history = False
 multi_lane = True
-convert_model = False
+convert_model = True
 
 pretrained_model_path = '/datastore/data/cxl/GRIP/trained_models/argo/all_data/model_argo_all_sl_mul_pos_vel_1218_14:53:53_epoch_0024.pt'
 view = True 
@@ -75,7 +75,7 @@ if not train and not os.path.exists(save_view_path):
 
 dev = torch.device("cpu")
 use_cuda = False
-if not convert_model and torch.cuda.is_available():
+if torch.cuda.is_available():#not convert_model and 
     dev = torch.device("cuda")
     use_cuda = True
 # model param

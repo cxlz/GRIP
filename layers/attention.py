@@ -28,7 +28,7 @@ class Attention(nn.Module):
         self.dropout = nn.Dropout(p=0.1)
         self.hard = hard
 
-    def forward(self, P, M, mask=torch.Tensor()):
+    def forward(self, P, M, mask):
         r"""
 
         :param P: a list of polyline vectors, form a tensor.

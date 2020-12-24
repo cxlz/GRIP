@@ -17,19 +17,15 @@ import time
 from types import ModuleType
 # from util.map_util import HDMap
 
+import config.configure as config
+# from util.map_util import HDMap, LaneSegment
+
 from argoverse.evaluation.competition_util import generate_forecasting_h5
 from argoverse.evaluation import eval_forecasting
 from argoverse.map_representation.map_api import ArgoverseMap
 from argoverse.utils import centerline_utils
 from shapely.geometry import LineString
 from argoverse.map_representation.lane_segment import LaneSegment
-
-import config.configure as config
-# from util.map_util import HDMap, LaneSegment
-
-if config.map_type == "argo":
-    print("loading ArgoverseMap")
-    avm = ArgoverseMap()
 
 CUDA_VISIBLE_DEVICES='0'
 os.environ["CUDA_VISIBLE_DEVICES"] = CUDA_VISIBLE_DEVICES
@@ -770,7 +766,11 @@ if __name__ == '__main__':
         my_print("convert jit script model from [%s]"%config.pretrained_model_path)
         script_model = torch.jit.script(model)
         # script_model = torch.jit.trace(model.cpu(), (example, example_A))
-        torch.jit.save(script_model, "grip_predictor.pt")
+        if config.use_cuda:
+            model_name = "grip_predictor_gpu.pt"
+        else:
+            model_name = "grip_predictor_cpu.pt"
+        torch.jit.save(script_model, model_name)
         os._exit(0)
 
     data_root = config.data_root
@@ -792,6 +792,9 @@ if __name__ == '__main__':
             # train_data_file = os.path.join(data_root, train_data_path, train_data_file)
         run_trainval(model, pra_traindata_path=train_data_path, pra_testdata_path=test_data_file)
     else:
+        if config.map_type == "argo":
+            print("loading ArgoverseMap")
+            avm = ArgoverseMap()
         run_val(model, val_data_path)
         # run_test(model, val_data_path)
         # run_test(model, test_data_path)
