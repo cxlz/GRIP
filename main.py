@@ -759,7 +759,7 @@ if __name__ == '__main__':
         model = my_load_model(model, pretrained_model_path)
 
     if config.convert_model:
-        model.eval().cpu()
+        model.eval().to(config.dev)
         example = torch.rand(1, 4, 6, 120)
         example_A = torch.rand(3, 120, 120)
         example_l = 6

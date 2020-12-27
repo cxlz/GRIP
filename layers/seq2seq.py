@@ -66,7 +66,7 @@ class Seq2Seq(nn.Module):
         self.linear = nn.Linear(hidden_size*60, hidden_size)
         
 
-    def forward(self, in_data, last_location, map_data=torch.zeros(0), pred_length:int=6, mask=torch.zeros(0), map_mask=torch.zeros(0)): #, teacher_forcing_ratio:int=0, teacher_location=torch.zeros(1)
+    def forward(self, in_data, last_location, map_data, pred_length:int=6, mask=torch.Tensor(), map_mask=torch.Tensor()): #, teacher_forcing_ratio:int=0, teacher_location=torch.zeros(1)
         
         
         batch_size = in_data.shape[0] // config.max_num_map
@@ -80,11 +80,11 @@ class Seq2Seq(nn.Module):
             # hidden = hidden.cuda()
             #    
         encoded_output, hidden = self.encoder(in_data) #in_data (NV, T, C) -->encoded_output (NV, T, H) hidden (L, NV, H)
-        if self.training:
-            # encoded_output = encoded_output.reshape((batch_size, -1, encoded_output.shape[-2], encoded_output.shape[-1]))[:,0]
-            history_out = self.dropout(encoded_output)
-            history_out = self.linear(history_out)
-            outputs[:, :history_frames] = history_out
+        # if self.training:
+        #     # encoded_output = encoded_output.reshape((batch_size, -1, encoded_output.shape[-2], encoded_output.shape[-1]))[:,0]
+        #     history_out = self.dropout(encoded_output)
+        #     history_out = self.linear(history_out)
+        #     outputs[:, :history_frames] = history_out
 
         if config.use_map:
             map_encoded_output, map_hidden = self.encoder(map_data) #map_data (NmV, mT, C) --> map_hidden (L, NmV, H)
@@ -122,10 +122,10 @@ class Seq2Seq(nn.Module):
             decoder_input = now_out
         outputs = outputs.reshape(batch_size, -1, outputs.shape[-2], outputs.shape[-1])
         # att = None
-        if self.training:
-            return outputs.permute(0,3,2,1), att
-        else:
-            return outputs[:,:,history_frames:].permute(0,3,2,1), att
+        # if self.training:
+        #     return outputs.permute(0,3,2,1), att
+        # else:
+        return outputs[:,:,history_frames:].permute(0,3,2,1), att
 
 ####################################################
 ####################################################
