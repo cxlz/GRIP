@@ -539,8 +539,8 @@ def val_model(pra_model, pra_data_loader):
             # argmax_att = torch.argmax(att, dim=-1).unsqueeze(-1).unsqueeze(-1).unsqueeze(-1)
             # ori_output_loc_GT = ori_output_loc_GT.gather(dim=-1, index=argmax_att.repeat((1, ori_output_loc_GT.shape[1], ori_output_loc_GT.shape[2], 1)))
 
-            predicted = predicted.gather(dim=-1, index=argmax_att.repeat((1, predicted.shape[1], predicted.shape[2], 1)))
-            overall_sum_time, overall_num, x2y2 = compute_RMSE(predicted[:,:,:,0:1], ori_output_loc_GT[:,:,:,0:1], output_mask[:,:,:,0:1])       
+            predicted_loc = predicted_loc.gather(dim=-1, index=argmax_att.repeat((1, predicted_loc.shape[1], predicted_loc.shape[2], 1)))
+            overall_sum_time, overall_num, x2y2 = compute_RMSE(predicted_loc[:,:,:,0:1], ori_output_loc_GT[:,:,:,0:1], output_mask[:,:,:,0:1])       
             now_x2y2 = x2y2.detach().cpu().numpy()
             now_x2y2 = now_x2y2.sum(axis=-1)
             overall_num = overall_num.detach().cpu().numpy()
@@ -653,7 +653,7 @@ def run_trainval(pra_model, pra_traindata_path, pra_testdata_path):
     pre_loss = float("inf")
     best_epoch = 0
     train_data_files = sorted([os.path.join(pra_traindata_path, f) for f in os.listdir(pra_traindata_path) if f.split(".")[-1] == "pkl"])
-    train_data_files = train_data_files[:1]
+    # train_data_files = train_data_files[:1]
     for now_epoch in range(total_epoch):
         total_train_loss = 0
         total_val_loss = 0

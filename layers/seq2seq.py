@@ -80,11 +80,11 @@ class Seq2Seq(nn.Module):
             # hidden = hidden.cuda()
             #    
         encoded_output, hidden = self.encoder(in_data) #in_data (NV, T, C) -->encoded_output (NV, T, H) hidden (L, NV, H)
-        if self.training:
-            # encoded_output = encoded_output.reshape((batch_size, -1, encoded_output.shape[-2], encoded_output.shape[-1]))[:,0]
-            history_out = self.dropout(encoded_output)
-            history_out = self.linear(history_out)
-            outputs[:, :history_frames] = history_out
+        # if self.training:
+        #     # encoded_output = encoded_output.reshape((batch_size, -1, encoded_output.shape[-2], encoded_output.shape[-1]))[:,0]
+        #     history_out = self.dropout(encoded_output)
+        #     history_out = self.linear(history_out)
+        #     outputs[:, :history_frames] = history_out
 
         if config.use_map:
             map_encoded_output, map_hidden = self.encoder(map_data) #map_data (NmV, mT, C) --> map_hidden (L, NmV, H)

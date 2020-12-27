@@ -56,7 +56,7 @@ num_node = max_num_object
 graph_args={'max_hop':max_hop, 'num_node':num_node}
 loss_weight = [1, 1, 1]
 
-train = False
+train = True
 load_model = False
 vel_mode = True
 use_map = True
@@ -75,7 +75,7 @@ if not train and not os.path.exists(save_view_path):
 
 dev = torch.device("cpu")
 use_cuda = False
-if not convert_model and torch.cuda.is_available():
+if torch.cuda.is_available():#not convert_model and 
     dev = torch.device("cuda")
     use_cuda = True
 # model param
