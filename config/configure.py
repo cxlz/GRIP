@@ -63,9 +63,9 @@ use_map = True
 use_celoss = True
 use_history = False
 multi_lane = True
-convert_model = False
+convert_model = True
 
-pretrained_model_path = '/datastore/data/cxl/GRIP/trained_models/argo/all_data/model_argo_all_sl_mul_pos_vel_1218_14:53:53_epoch_0024.pt'
+pretrained_model_path = '/datastore/data/cxl/GRIP/trained_models/argo/all_data/model_argo_all_sl_mul_pos_vel_1227_19:16:15_epoch_0024.pt'
 view = True 
 save_view = True
 save_view_path = os.path.join(work_dir, "view", pretrained_model_path.split(".")[0].split("/")[-1])

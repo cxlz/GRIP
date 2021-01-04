@@ -112,8 +112,8 @@ class Model(nn.Module):
                 mx, _ = gcn(mx)
             graph_conv_map_feature = self.reshape_for_lstm(mx)
         else:
-            graph_conv_map_feature = torch.Tensor()
-            map_mask = torch.Tensor()
+            graph_conv_map_feature = torch.zeros(0)
+            map_mask = torch.zeros(0)
 
         # now_predict.shape = (N, T, V*C)
         self.num_node = x.shape[-1]

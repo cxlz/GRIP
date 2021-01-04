@@ -122,10 +122,10 @@ class Seq2Seq(nn.Module):
             decoder_input = now_out
         outputs = outputs.reshape(batch_size, -1, outputs.shape[-2], outputs.shape[-1])
         # att = None
-        if self.training:
-            return outputs.permute(0,3,2,1), att
-        else:
-            return outputs[:,:,history_frames:].permute(0,3,2,1), att
+        # if self.training:
+        #     return outputs.permute(0,3,2,1), att
+        # else:
+        return outputs[:,:,history_frames:].permute(0,3,2,1), att
 
 ####################################################
 ####################################################
