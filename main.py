@@ -759,18 +759,23 @@ if __name__ == '__main__':
         model = my_load_model(model, pretrained_model_path)
 
     if config.convert_model:
-        model.eval().to(config.dev)
+        model.eval()
         example = torch.rand(1, 4, 6, 120)
         example_A = torch.rand(3, 120, 120)
         example_l = 6
         my_print("convert jit script model from [%s]"%config.pretrained_model_path)
         script_model = torch.jit.script(model)
         # script_model = torch.jit.trace(model.cpu(), (example, example_A))
-        if config.use_cuda:
-            model_name = "grip_predictor_gpu.pt"
-        else:
-            model_name = "grip_predictor_cpu.pt"
-        torch.jit.save(script_model, model_name)
+        pretrained_model_name = pretrained_model_path.split("/")[-1].split(".")[0]
+        model_save_path = os.path.join("model", pretrained_model_name)
+        if not os.path.exists(model_save_path):
+            os.makedirs(model_save_path)
+        gpu_model_name = "grip_predictor_gpu.pt"
+        cpu_model_name = "grip_predictor_cpu.pt"
+        model.to(torch.device("cuda"))
+        torch.jit.save(script_model, os.path.join(model_save_path, gpu_model_name))
+        model.to(torch.device("cpu"))
+        torch.jit.save(script_model, os.path.join(model_save_path, cpu_model_name))
         os._exit(0)
 
     data_root = config.data_root
