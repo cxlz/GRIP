@@ -5,10 +5,14 @@ from scipy import spatial
 import pickle
 from tqdm import tqdm
 import cv2
+from scipy import signal
+from datetime import datetime
+import time
 
 from argoverse.map_representation.map_api import ArgoverseMap
 from argoverse.utils import centerline_utils
 from shapely.geometry import LineString
+from argoverse.map_representation.lane_segment import LaneSegment
 
 import config.configure as config
 # from util.map_util import HDMap, LaneSegment
@@ -50,12 +54,18 @@ def visulize(tar, lane, a):
     offset = 255 - ((mean_xy - min_xy).reshape((2,1)) / scale_val)
     min_xy = min_xy.reshape((2,1))
     zero_pos = (- min_xy / scale_val + offset).astype("int")
-    # a = att[idx, i::history_frame_num].copy() # T, T'*V'
-    # a = np.mean(a, axis=0)
-    # a = a.reshape((lane.shape[1], lane.shape[2])) # T', V'
-    # sum_a = np.sum(a, axis=-1)
+
     argmax_a = np.argmax(a, axis=-1)
     img = np.ones((512,512,3)) * 255
+    tar = (tar - min_xy) / scale_val + offset
+    tar = tar.astype("int")
+    zero_pos = zero_pos.astype("int")
+    for j in range(tar.shape[-1]):
+        color = (255,0,0)
+        if j < 5:
+            color = (0, 0, 255)
+        if (tar[0,j] != zero_pos[0] or tar[1,j] != zero_pos[1]):
+            img = cv2.circle(img, (tar[0,j], tar[1,j]), 3, color, thickness=2)
     for ii in range(lane.shape[-1]):
         segment = (lane[:,:,ii] - min_xy) / scale_val + offset
         segment = segment.astype("int")
@@ -70,16 +80,12 @@ def visulize(tar, lane, a):
             if (p1[0] != zero_pos[0] or p1[1] != zero_pos[1]) and (p2[0] != zero_pos[0] or p2[1] != zero_pos[1]):
                 img = cv2.line(img, (p1[0], p1[1]), (p2[0], p2[1]), color, thickness)
 
-    tar = (tar - min_xy) / scale_val + offset
-    tar = tar.astype("int")
-    zero_pos = zero_pos.astype("int")
+    
     # out *= 5 
     # tar *= 5
     # out = out.astype("int") + 255 
     # tar = tar.astype("int") + 255
-    for j in range(tar.shape[-1]):
-        if (tar[0,j] != zero_pos[0] or tar[1,j] != zero_pos[1]):
-            img = cv2.circle(img, (tar[0,j], tar[1,j]), 3, (255,0,0), thickness=2)
+    
     cv2.imshow("img_grip", img)
     cv2.waitKey(1)
 
@@ -188,15 +194,14 @@ def process_trajectory_data(id, city, now_traj_sl:list, trajectory_sl_list:list,
     return
 
 
-def process_lane_data(traj_sl:np.ndarray, mean_xy, city, lane_num):
-    lane_ids = set([t[0] for t in traj_sl if t[0] != 0])
+def process_lane_data(traj_sl:np.ndarray, mean_xy, ego_position, city, lane_num):
     lane_ids = []
     for t in traj_sl:
         if t[0] != 0 and t[0] not in lane_ids:
             lane_ids.append(t[0])
     now_map_feature = []
     last_frame = np.zeros((total_feature_dimension))
-    for lane_id in lane_ids:
+    for j, lane_id in enumerate(lane_ids):
         lane = avm.city_lane_centerlines_dict[city][lane_id]
         turn = lane.turn_direction.lower()
         if turn == 'right':
@@ -206,15 +211,28 @@ def process_lane_data(traj_sl:np.ndarray, mean_xy, city, lane_num):
         else:
             turn = 0
         segment = lane.centerline
-        for i in range(segment.shape[0]):
+        start_s, _ = centerline_utils.get_normal_and_tangential_distance_point(ego_position[0], ego_position[1], segment)
+        for i in range(0, segment.shape[0], 2):
+            if j == 0:
+                curr_s, _ = centerline_utils.get_normal_and_tangential_distance_point(segment[i][0], segment[i][1], segment)
+                if curr_s < start_s:
+                    continue
             curr_frame = np.array([lane_num, lane_id, 0, segment[i][0] - mean_xy[0], segment[i][1] - mean_xy[1], 0, 0, 0, 0, turn, 1], dtype="float")
             last_frame = curr_frame
             now_map_feature.append(curr_frame)  
             if len(now_map_feature) >= config.segment_point_num:
                 return np.array(now_map_feature, dtype="float")
+    last_frame[-1] = 0
+    # print(len(now_map_feature))
     for i in range(len(now_map_feature), config.segment_point_num):
         now_map_feature.append(last_frame)
-    return np.array(now_map_feature, dtype="float")
+    # feat_step = len(now_map_feature) // config.segment_point_num
+    # map_feature = signal.resample(now_map_feature, config.segment_point_num, axis=0)
+    # map_feature = []
+    # for i in range(0, config.segment_point_num * feat_step, feat_step):
+    #     map_feature.append(now_map_feature[i])
+    map_feature = now_map_feature
+    return np.array(map_feature, dtype="float")
 
 
 
@@ -327,7 +345,7 @@ def process_map_data(center, trajectory, search_radius, point_num, mean_xy, city
         except:
             print(trajectory_sl_list)
         for lane_num, traj_sl in enumerate(trajectory_sl_list):
-            now_map_feature = process_lane_data(traj_sl, mean_xy, city, lane_num)
+            now_map_feature = process_lane_data(traj_sl, mean_xy, center, city, lane_num)
             map_feature_list.append(now_map_feature)
 
         map_feature_list = np.array(map_feature_list, dtype="float")
@@ -397,9 +415,9 @@ def process_data(pra_now_dict, pra_start_ind, pra_end_ind, pra_observed_last, fr
     ego_trajectory[:, :2] += m_xy
 
     map_feature_list, trajectory_sl_list, idList = process_map_data(ego_position, ego_trajectory, config.lane_search_radius, config.segment_point_num, m_xy, city)
-    for map_feat in map_feature_list:
-        if np.array_equal(map_feat[0,3:5], map_feat[-1,3:5]):
-            print(map_feat)
+    # for map_feat in map_feature_list:
+    #     if np.array_equal(map_feat[0,3:5], map_feat[-1,3:5]):
+    #         print(map_feat)
     # if curr_lane_id >= 10:
     #     print(curr_lane_id)
     # object feature with a shape of (frame#, object#, 11) -> (object#, frame#, 11)
@@ -424,6 +442,8 @@ def process_data(pra_now_dict, pra_start_ind, pra_end_ind, pra_observed_last, fr
         # visulize(np.transpose(ego_trajectory[:,:2], (1,0)), np.transpose(map_feature_list[:,:,3:5], (2,1,0)), curr_lane_label)    
         # _ = avm.get_nearest_centerline(ego_position, city, visualize=True)
         print(trajectory_sl_list)
+
+    # visulize(np.transpose(ego_trajectory[:,:2], (1,0)), np.transpose(map_feature_list[:,:,3:5], (2,1,0)), curr_lane_label)    
     
     # np.transpose(object_feature_list, (1,0,2))
     object_frame_feature[:num_visible_object+num_non_visible_object] = np.transpose(object_feature_list, (1,0,2))
@@ -535,16 +555,16 @@ def generate_test_data(pra_file_path):
     return all_feature_list, all_adjacency_list, all_mean_list, all_map_list, all_lane_list, all_trajectory_list, seq_id, city
 
 
-def generate_data(pra_file_path_list, pra_is_train=True, save_data=True, idx=-1):
+def generate_data(pra_file_path_list, pra_is_train="train", save_data=True, idx=-1):
     all_data = []
     all_adjacency = []
     all_mean_xy = []
     all_map_data = []
     all_lane_label = []
-    all_trajetory = []
+    all_trajectory = []
     all_seq_id_city = []
     # for file_path in pra_file_path_list:
-    for file_path in tqdm(pra_file_path_list):
+    for file_path in tqdm(pra_file_path_list[17:]):
         # print(file_path)
         if pra_is_train == "train" or pra_is_train == "val":
             now_data, now_adjacency, now_mean_xy, now_map_data, now_lane_label, now_trajectory, seq_id, city = generate_train_data(file_path)
@@ -556,7 +576,7 @@ def generate_data(pra_file_path_list, pra_is_train=True, save_data=True, idx=-1)
             all_mean_xy.extend(now_mean_xy)
             all_map_data.extend(now_map_data)
             all_lane_label.extend(now_lane_label)
-            all_trajetory.extend(now_trajectory)
+            all_trajectory.extend(now_trajectory)
             all_seq_id_city.append([seq_id, city])
 
     all_data = np.array(all_data) #(N, C, T, V)=(5010, 11, 12, 70) Train
@@ -564,8 +584,11 @@ def generate_data(pra_file_path_list, pra_is_train=True, save_data=True, idx=-1)
     all_mean_xy = np.array(all_mean_xy) #(5010, 2) Train
     all_map_data = np.array(all_map_data)
     all_lane_label = np.array(all_lane_label)
-    all_trajetory = np.array(all_trajetory)
+    all_trajectory = np.array(all_trajectory)
     all_seq_id_city = np.array(all_seq_id_city)
+
+    map_start_idx = preprocess_map_data(all_data, all_map_data, all_trajectory, all_mean_xy, all_seq_id_city)
+    all_seq_id_city = np.concatenate((all_seq_id_city, map_start_idx), axis=1)
 
     # Train (N, C, T, V)=(5010, 11, 12, 70), (5010, 70, 70), (5010, 2)
     # Test (N, C, T, V)=(415, 11, 6, 70), (415, 70, 70), (415, 2)
@@ -585,10 +608,69 @@ def generate_data(pra_file_path_list, pra_is_train=True, save_data=True, idx=-1)
 
 
         with open(save_path, 'wb') as writer:
-            pickle.dump([all_data, all_adjacency, all_mean_xy, all_map_data, all_lane_label, all_trajetory, all_seq_id_city], writer)
+            pickle.dump([all_data, all_adjacency, all_mean_xy, all_map_data, all_lane_label, all_trajectory, all_seq_id_city], writer)
 
-    # return all_data, all_adjacency, all_mean_xy, all_map_data, all_lane_label, all_trajetory
+def preprocess_data(pra_is_train="train", idx=-1):
+    save_path = ""
+    if pra_is_train == "train":
+        save_path = os.path.join(data_root, train_data_path, "%02d_sl_"%idx + config.train_data_file)
+    elif pra_is_train == "val":
+        save_path = os.path.join(data_root, val_data_path,   "%02d_sl_"%idx + config.val_data_file)
+    elif pra_is_train == "test":
+        save_path = os.path.join(data_root, test_data_path,  "%02d_sl_"%idx + config.test_data_file)
 
+    print("loading %s data: [%s]"%(pra_is_train, save_path))
+
+    with open(save_path, 'rb') as reader:
+        # Training (N, C, T, V)=(5010, 11, 12, 120), (5010, 120, 120), (5010, 2)
+        [all_data, all_adjacency, all_mean_xy, all_map_data, all_lane_label, all_trajectory, all_seq_id_city] = pickle.load(reader)
+    map_start_idx = preprocess_map_data(all_data, all_map_data, all_trajectory, all_mean_xy, all_seq_id_city)
+    all_seq_id_city = np.concatenate((all_seq_id_city, map_start_idx), axis=1)
+    with open(save_path, 'wb') as writer:
+        pickle.dump([all_data, all_adjacency, all_mean_xy, all_map_data, all_lane_label, all_trajectory, all_seq_id_city], writer)
+    # return all_data, all_adjacency, all_mean_xy, all_map_data, all_lane_label, all_trajectory
+
+def get_lane_length(lane_id, city) -> (LaneSegment, float):
+    try:
+        lane = avm.city_lane_centerlines_dict[city][lane_id]
+    except:
+        print(city, lane_id)
+        return 0
+    segment = lane.centerline
+    lane_string = LineString(segment)
+    lane_length = lane_string.length
+    return lane, lane_length
+
+def preprocess_map_data(ori_data, ori_map_data, ori_trajectory, ori_mean_xy, seq_id_city):
+    last_pos = ori_data[:,3:5,history_frames-1:history_frames, 0:1]
+    map_diff_data = np.concatenate((ori_map_data[:,3:5] - last_pos, ori_map_data[:,-2:]), axis=1)
+    map_start_idx = np.zeros((map_diff_data.shape[0], map_diff_data.shape[-1]))
+    for n in tqdm(range(map_diff_data.shape[0])):
+        city = seq_id_city[n, 1]
+        # city = "PIT" if city == 0 else "MIA"
+        for v in range(map_diff_data.shape[-1]):
+            if ori_map_data[n, -1, 0, v] == 0:
+                break
+            # start_lane_id = ori_trajectory[n, 0, history_frames-1, v];
+            start_lane_s = ori_trajectory[n, 1, history_frames-1, v];
+            pre_lane_ids = [int(ori_map_data[n, 1, 0, v])]
+            for t in range(map_diff_data.shape[2]):
+                if ori_map_data[n, -1, t, v] == 0:
+                    break
+                curr_lane_id = int(ori_map_data[n, 1, t, v])
+                # if  curr_lane_id != start_lane_id:
+                if curr_lane_id not in pre_lane_ids:
+                    _, lane_length = get_lane_length(pre_lane_ids[-1], city)
+                    start_lane_s -= lane_length 
+                    pre_lane_ids.append(curr_lane_id)
+                lane = avm.city_lane_centerlines_dict[city][curr_lane_id]
+                segment = lane.centerline
+                map_s, _ = centerline_utils.get_normal_and_tangential_distance_point((ori_map_data[n,3,t,v] + ori_mean_xy[n,0]), (ori_map_data[n,4,t,v] + ori_mean_xy[n,1]), segment)
+                if map_s >= start_lane_s:
+                    # print(n, v)
+                    map_start_idx[n,v] = t
+                    break 
+    return map_start_idx
 
 if __name__ == '__main__':
     train_data_path = config.train_data_path
@@ -604,32 +686,49 @@ if __name__ == '__main__':
 
     print("train data root: %s"%data_root)
     
-    train_data_length = len(train_data_path_list) // train_data_size
-    if len(train_data_path_list) % train_data_size != 0:
-        train_data_length += 1 
-    for idx in range(0,train_data_length):#
-        print('Generating Training Data_%02d/%02d'%(idx+1, train_data_length))
-        start_index = idx * train_data_size
-        end_index = min((idx + 1) * train_data_size, len(train_data_path_list))
-        generate_data(train_data_path_list[start_index:end_index], pra_is_train="train", idx=idx)
+    # train_data_length = len(train_data_path_list) // train_data_size
+    # if len(train_data_path_list) % train_data_size != 0:
+    #     train_data_length += 1 
+    # for idx in range(1):#
+    #     print('Generating Training Data_%02d/%02d'%(idx+1, train_data_length))
+    #     preprocess_data(pra_is_train="train", idx=idx)
 
-    val_data_length = len(val_data_path_list) // val_data_size
-    if len(val_data_path_list) % val_data_size != 0:
-        val_data_length += 1 
-    for idx in range(val_data_length):#
-        print('Generating Validate Data_%02d/%02d'%(idx+1, val_data_length))
-        start_index = idx * val_data_size
-        end_index = min((idx + 1) * val_data_size, len(val_data_path_list))
-        generate_data(val_data_path_list[start_index:end_index], pra_is_train="val", idx=idx)
+    # val_data_length = len(val_data_path_list) // val_data_size
+    # if len(val_data_path_list) % val_data_size != 0:
+    #     val_data_length += 1 
+    # for idx in range(val_data_length):#
+    #     print('Generating Validate Data_%02d/%02d'%(idx+1, val_data_length))
+    #     preprocess_data(pra_is_train="val", idx=idx)
 
-    test_data_length = len(test_data_path_list) // test_data_size
-    if len(test_data_path_list) % test_data_size != 0:
-        test_data_length += 1 
-    for idx in range(test_data_length):#
-        print('Generating Testing Data_%02d/%02d'%(idx+1, test_data_length))
-        start_index = idx * test_data_size
-        end_index = min((idx + 1) * test_data_size, len(test_data_path_list))
-        generate_data(test_data_path_list[start_index:end_index], pra_is_train="test", idx=idx)
+
+    # time.sleep(60 * 60 * 3)
+
+    # train_data_length = len(train_data_path_list) // train_data_size
+    # if len(train_data_path_list) % train_data_size != 0:
+    #     train_data_length += 1 
+    # for idx in range(0,train_data_length):#
+    #     print('Generating Training Data_%02d/%02d'%(idx+1, train_data_length))
+    #     start_index = idx * train_data_size
+    #     end_index = min((idx + 1) * train_data_size, len(train_data_path_list))
+    #     generate_data(train_data_path_list[start_index:end_index], pra_is_train="train", idx=idx)
+
+    # val_data_length = len(val_data_path_list) // val_data_size
+    # if len(val_data_path_list) % val_data_size != 0:
+    #     val_data_length += 1 
+    # for idx in range(val_data_length):#
+    #     print('Generating Validate Data_%02d/%02d'%(idx+1, val_data_length))
+    #     start_index = idx * val_data_size
+    #     end_index = min((idx + 1) * val_data_size, len(val_data_path_list))
+    #     generate_data(val_data_path_list[start_index:end_index], pra_is_train="val", idx=idx)
+
+    # test_data_length = len(test_data_path_list) // test_data_size
+    # if len(test_data_path_list) % test_data_size != 0:
+    #     test_data_length += 1 
+    # for idx in range(test_data_length):#
+    #     print('Generating Testing Data_%02d/%02d'%(idx+1, test_data_length))
+    #     start_index = idx * test_data_size
+    #     end_index = min((idx + 1) * test_data_size, len(test_data_path_list))
+    #     generate_data(test_data_path_list[start_index:end_index], pra_is_train="test", idx=idx)
   
 
 

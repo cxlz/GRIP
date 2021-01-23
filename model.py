@@ -106,7 +106,7 @@ class Model(nn.Module):
 
         if config.use_map:
             mx = pra_map
-            map_mask = mx[:, -1, 0] == 1
+            map_mask = mx[:, -1, x.shape[2]] == 1
             mx = self.map_conv_network(mx)
             for gcn in self.map_gcn_networks:
                 mx, _ = gcn(mx)

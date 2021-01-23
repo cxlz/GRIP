@@ -15,7 +15,7 @@ neighbor_distance = 10 # meter
 # map param
 only_nearby_lanes = True
 lane_search_radius = 4
-segment_point_num = 20
+segment_point_num = 50
 map_path = "util/map/base_map.bin"
 map_type = "argo"
 
@@ -33,7 +33,7 @@ test_data_path = "prediction_test/"
 train_data_file = 'train_data_%d_%d_%d_%d.pkl'%(frame_steps, history_frames, future_frames, lane_search_radius)
 test_data_file = 'test_data_%d_%d_%d_%d.pkl'%(frame_steps, history_frames, future_frames, lane_search_radius)
 val_data_file = 'val_data_%d_%d_%d_%d.pkl'%(frame_steps, history_frames, future_frames, lane_search_radius)
-save_model_prefix = "model_argo_all_sl_mul_pos_"
+save_model_prefix = "model_argo_all_sl_vel_encode_"
 
 
 
@@ -42,11 +42,12 @@ batch_size_train = 64
 batch_size_val = 32
 batch_size_test = 1
 total_epoch = 25
-base_lr = 0.001
+base_lr = 0.0001
 lr_decay_epoch = 5
 lr_decay = 0.5
 dropout = 0.5
 sample_times = 6
+random_threshold = 1
 
 log_file = os.path.join(work_dir,'log_test.txt')
 test_result_file = 'prediction_result.txt'
@@ -63,9 +64,9 @@ use_map = True
 use_celoss = True
 use_history = False
 multi_lane = True
-convert_model = True
+convert_model = False
 
-pretrained_model_path = '/datastore/data/cxl/GRIP/trained_models/argo/all_data/model_argo_all_sl_mul_pos_vel_1227_19:16:15_epoch_0024.pt'
+pretrained_model_path = '/datastore/data/cxl/GRIP/trained_models/argo/all_data/model_argo_all_sl_vel_0107_19:16:41_epoch_0024.pt'
 view = True 
 save_view = True
 save_view_path = os.path.join(work_dir, "view", pretrained_model_path.split(".")[0].split("/")[-1])
@@ -78,6 +79,7 @@ use_cuda = False
 if torch.cuda.is_available():#not convert_model and 
     dev = torch.device("cuda")
     use_cuda = True
+    
 # model param
 in_channels = 4
 spatial_kernel_size = max_hop + 1

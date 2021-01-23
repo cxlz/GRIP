@@ -68,7 +68,7 @@ class Attention(nn.Module):
 
         mask = mask.unsqueeze(1) # [N, V, mV]
         mask = mask.repeat((L,V,1)) # [LN, V, mV]
-        zero_tensor = torch.ones_like(ans) * -1e1
+        zero_tensor = torch.ones_like(ans) * -1e3
         ans = torch.where(mask, ans, zero_tensor)
         ans = F.softmax(ans, dim=-1)
 

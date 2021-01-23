@@ -39,6 +39,8 @@ class Feeder(torch.utils.data.Dataset):
         # # last 20% data as validation set
         self.train_val_test = train_val_test
 
+        self.random_threshold = config.random_threshold
+
         if train_val_test.lower() == 'train':
             self.all_feature = self.all_feature[train_id_list]
             self.all_adjacency = self.all_adjacency[train_id_list]
@@ -85,7 +87,7 @@ class Feeder(torch.utils.data.Dataset):
         now_trajectory = self.all_trajectory[idx].copy()
         now_seq_id_city = self.all_seq_id_city[idx].copy()
 
-        if self.train_val_test.lower() == 'train' and np.random.random()>0.5:
+        if self.train_val_test.lower() == 'train' and np.random.random()>self.random_threshold:
             angle = 2 * np.pi * np.random.random()
             sin_angle = np.sin(angle)
             cos_angle = np.cos(angle)
